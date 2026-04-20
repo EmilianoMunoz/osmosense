@@ -45,3 +45,25 @@ def resumen_coleccion(coleccion: ee.ImageCollection) -> None:
 
     print(f"Mejor imagen  → fecha: {fecha} | nubosidad: {nubes:.1f}%")
     print(f"Bandas seleccionadas: {bandas}")
+
+
+def obtener_imagen_compuesta(
+    coleccion: ee.ImageCollection,
+    geometria: ee.Geometry
+) -> ee.Image:
+    """Genera una imagen compuesta a partir de una colección Sentinel-2.
+
+    Crea un mosaico tomando el valor mediano de cada píxel a través
+    de todas las imágenes disponibles en la colección. Esto garantiza
+    cobertura completa de la zona aunque ninguna imagen individual
+    cubra todo el área.
+
+    Args:
+        coleccion: Colección de imágenes Sentinel-2 ya filtrada.
+        geometria: Geometría del área de interés para recortar.
+
+    Returns:
+        Imagen compuesta ee.Image con cobertura completa del área.
+    """
+    compuesta = coleccion.median().clip(geometria)
+    return compuesta

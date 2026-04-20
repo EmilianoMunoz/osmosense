@@ -68,3 +68,43 @@ Las parcelas individuales se definirán como GeoJSON propios.
 Se eligió Python por ser el estándar en proyectos de teledetección,
 machine learning y análisis geoespacial, con amplia disponibilidad
 de librerías especializadas.
+
+## 20/04/2026
+### Estrategia de imagen: mosaico mediano en lugar de imagen individual
+Se reemplazó la selección de imagen individual (coleccion.first()) por
+un mosaico mediano (coleccion.median()) generado a partir de todas las
+imágenes disponibles en el período. Esto garantiza cobertura completa
+del área de interés aunque ninguna imagen individual cubra todas las
+parcelas. La fecha se maneja como rango de referencia del período
+analizado.
+
+## 20/04/2026
+### Índices espectrales seleccionados
+Se definieron 5 índices espectrales basados en revisión de literatura
+reciente (2023-2025) sobre viñedos y olivares con Sentinel-2:
+- NDMI (B8-B11)/(B8+B11): índice principal de estrés hídrico.
+  Detecta cambios en contenido de agua foliar 2-4 semanas antes
+  de síntomas visibles.
+- NDVI (B8-B4)/(B8+B4): vigor general del cultivo. Útil para
+  series temporales y diferenciación entre cultivos.
+- NDWI (B3-B8)/(B3+B8): contenido de agua superficial.
+- MSI B11/B8: estrés hídrico con interpretación inversa al NDMI.
+  Valores más altos indican mayor estrés.
+- SAVI 1.5*(B8-B4)/(B8+B4+0.5): variante del NDVI que corrige
+  el efecto del suelo desnudo, relevante para zonas áridas
+  como San Rafael.
+
+## 20/04/2026
+### Extracción de estadísticas: reduceRegion con escala 10m
+Se utiliza ee.Reducer.mean() con escala de 10 metros (resolución
+nativa de Sentinel-2 para bandas B3, B4, B8) para extraer el valor
+medio de cada índice dentro del polígono de cada parcela. Esto
+produce un vector de features por parcela y fecha, que es la unidad
+de entrada para los modelos ML.
+
+## 20/04/2026
+### Persistencia inicial: CSV
+Los resultados de índices se persisten en CSV como solución inicial
+para desarrollo y pruebas. Se migrará a PostgreSQL + PostGIS cuando
+se integre el backend FastAPI (HU-005 completa con BD en fase
+siguiente).
