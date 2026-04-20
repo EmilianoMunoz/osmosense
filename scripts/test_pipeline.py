@@ -11,6 +11,8 @@ from app.services.indices import (
     extraer_estadisticas,
     guardar_resultados,
 )
+from app.services.estres import aplicar_clasificacion
+
 
 if __name__ == "__main__":
 
@@ -71,3 +73,15 @@ if __name__ == "__main__":
     # Paso 8 — guardar resultados
     print("\nGuardando resultados...")
     guardar_resultados(resultados)
+
+    # Paso 9 — clasificar estrés hídrico por reglas
+    print("\nClasificando nivel de estrés hídrico...")
+    df_estres = aplicar_clasificacion(resultados)
+
+    print("\nResultados finales:")
+    print(df_estres[[
+        "parcela_id", "cultivo",
+        "ndvi", "ndmi", "msi",
+        "estres_ndmi", "estres_msi", "estres_ndvi",
+        "estres_combinado"
+    ]].to_string(index=False))
