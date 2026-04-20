@@ -1,0 +1,10 @@
+earthengine-api
+geemap
+geopandas
+shapely
+fastapi
+uvicorn
+python-dotenv
+rasterio
+numpy
+pandas
