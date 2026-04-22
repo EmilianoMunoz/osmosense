@@ -56,9 +56,9 @@ def extraer_estadisticas(
     ).getInfo()
 
     return {
-        "parcela_id": parcela["id"],
-        "nombre":     parcela["nombre"],
-        "cultivo":    parcela["cultivo"],
+        "parcela_id": parcela.get("id", ""),
+        "nombre":     parcela.get("nombre") or parcela.get("id", ""),
+        "cultivo":    parcela.get("cultivo", ""),
         "fecha":      fecha,
         "ndvi":       round(stats.get("NDVI") or 0, 4),
         "ndmi":       round(stats.get("NDMI") or 0, 4),

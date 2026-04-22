@@ -108,3 +108,22 @@ Los resultados de índices se persisten en CSV como solución inicial
 para desarrollo y pruebas. Se migrará a PostgreSQL + PostGIS cuando
 se integre el backend FastAPI (HU-005 completa con BD en fase
 siguiente).
+
+## 22/04/2026
+### Dataset de clasificación de cultivos
+Se construyó un dataset de 140 muestras para entrenar el clasificador
+de cultivos (vid / olivo) con las siguientes características:
+- 19 parcelas de vid y 16 parcelas de olivo etiquetadas manualmente
+  mediante geojson.io sobre imágenes de Google Earth.
+- 4 períodos temporales (T1-T4 2024) para capturar variabilidad
+  estacional de cada cultivo.
+- Features: NDVI, NDMI, NDWI, MSI, SAVI.
+- Distribución: 76 muestras vid / 64 muestras olivo.
+
+### Etiquetado manual de parcelas
+Las parcelas fueron identificadas visualmente en Google Earth y
+digitalizadas con geojson.io. La distinción entre vid y olivo se
+realizó por patrón visual: hileras rectas y regulares para vid,
+copas redondeadas individuales para olivo. Se etiquetaron cuadros
+individuales dentro de establecimientos, permitiendo que un mismo
+predio tenga múltiples etiquetas de cultivo distintas.
