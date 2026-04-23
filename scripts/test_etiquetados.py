@@ -23,11 +23,14 @@ if __name__ == "__main__":
 
     inicializar_gee()
 
-    with open("data/parcelas/parcelas_etiquetadas.geojson") as f:
+    with open("data/parcelas/muestra_entrenamiento.geojson") as f:
         geojson = json.load(f)
 
     parcelas = geojson["features"]
     print(f"Parcelas cargadas: {len(parcelas)}")
+
+    from collections import Counter
+    print(f"Distribución: {Counter(f['properties']['cultivo'] for f in parcelas)}")
 
     geometria_sr = obtener_geometria_san_rafael()
     todos_resultados = []
@@ -67,11 +70,10 @@ if __name__ == "__main__":
                 resultados_periodo.append(resultado)
             except Exception as e:
                 errores.append(props.get("id", ""))
-                print(f"  ✗ {props.get('id')} → Error: {e}")
 
         print(f"  ✓ {len(resultados_periodo)}/{len(parcelas)} parcelas procesadas")
         if errores:
-            print(f"  Con errores: {errores}")
+            print(f"  Con errores: {len(errores)} parcelas")
 
         todos_resultados.extend(resultados_periodo)
 
