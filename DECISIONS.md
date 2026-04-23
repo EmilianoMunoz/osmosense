@@ -127,3 +127,24 @@ realizó por patrón visual: hileras rectas y regulares para vid,
 copas redondeadas individuales para olivo. Se etiquetaron cuadros
 individuales dentro de establecimientos, permitiendo que un mismo
 predio tenga múltiples etiquetas de cultivo distintas.
+
+## 22/04/2026
+### Fuente oficial de parcelas: IDEMendoza
+Se reemplazaron las parcelas etiquetadas manualmente por datos
+oficiales obtenidos del portal IDEMendoza (Infraestructura de
+Datos Espaciales de Mendoza):
+https://ide.mendoza.gov.ar
+El dataset provee el parcelario catastral con tipo de cultivo
+por parcela para todo el territorio de Mendoza. Se filtraron
+las parcelas correspondientes al departamento de San Rafael
+con cultivos de vid y olivo.
+
+### Justificación del modelo clasificador vs catastro estático
+El parcelario de IDEMendoza provee etiquetas de cultivo por parcela
+pero con fecha de actualización incierta. El modelo clasificador
+permite detectar discrepancias entre el catastro y el estado
+espectral actual de la parcela, identificando posibles cambios
+de uso de suelo (por ejemplo, reconversión de viñedo a olivar).
+Esto agrega valor al sistema más allá de la clasificación pura,
+habilitando un caso de uso de monitoreo de cambios de cultivo
+a lo largo del tiempo.
