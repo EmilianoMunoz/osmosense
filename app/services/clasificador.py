@@ -6,31 +6,27 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, confusion_matrix
 import joblib
 import os
+import numpy as np
 
-FEATURES = ["ndvi", "ndmi", "ndwi", "msi", "savi"]
+FEATURES = ["ndvi", "ndmi", "ndwi", "msi", "savi", "mes_sin", "mes_cos"]
 TARGET   = "cultivo"
 RUTA_MODELO = "models/clasificador_cultivo.pkl"
 
 
 def cargar_dataset(ruta: str = "data/dataset_vid_olivo.csv") -> pd.DataFrame:
-    """Carga el dataset de clasificación de cultivos.
-
-    Args:
-        ruta: Ruta al archivo CSV con el dataset etiquetado.
-
-    Returns:
-        DataFrame con features y etiquetas de cultivo.
-
-    Raises:
-        FileNotFoundError: Si el archivo no existe.
-    """
     if not os.path.exists(ruta):
         raise FileNotFoundError(f"Dataset no encontrado en {ruta}")
+
     df = pd.read_csv(ruta)
+
+    # codificación circular del mes
+    if "mes_sin" not in df.columns:
+        df["mes_sin"] = np.sin(2 * np.pi * df["mes"] / 12)
+        df["mes_cos"] = np.cos(2 * np.pi * df["mes"] / 12)
+
     print(f"Dataset cargado: {df.shape[0]} muestras, "
           f"{df[TARGET].value_counts().to_dict()}")
     return df
-
 
 def entrenar_clasificador(df: pd.DataFrame) -> tuple:
     """Entrena un clasificador Random Forest para distinguir vid de olivo.
