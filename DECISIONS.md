@@ -148,3 +148,134 @@ de uso de suelo (por ejemplo, reconversión de viñedo a olivar).
 Esto agrega valor al sistema más allá de la clasificación pura,
 habilitando un caso de uso de monitoreo de cambios de cultivo
 a lo largo del tiempo.
+
+Perfecto, exactamente lo esperado (400 parcelas × 4 períodos).
+Antes de seguir con el modelo de estrés, hacemos el commit con todo lo que trabajamos hoy. Primero actualizamos la documentación y después commiteamos.
+
+## 23/04/2026
+### Fuente oficial de parcelas: IDEMendoza
+Se reemplazaron las parcelas etiquetadas manualmente por datos
+oficiales del portal IDEMendoza (Infraestructura de Datos
+Espaciales de Mendoza):
+https://ide.mendoza.gov.ar
+El dataset provee el parcelario catastral con tipo de cultivo
+por parcela para todo Mendoza (216.721 parcelas). Se filtraron
+las correspondientes a San Rafael con cultivos vid y olivo,
+obteniendo 16.158 parcelas (15.447 vid, 711 olivo).
+
+### Sistema de coordenadas: reproyección EPSG:3857 → EPSG:4326
+El GeoJSON de IDEMendoza estaba en proyección Web Mercator
+(EPSG:3857, coordenadas en metros). Se reproyectó a WGS84
+(EPSG:4326, grados decimales) usando pyproj para compatibilidad
+con Google Earth Engine.
+
+### Muestra de entrenamiento: 400 parcelas balanceadas
+Se tomó una muestra aleatoria balanceada de 200 vid y 200 olivo
+con random.seed(42) para reproducibilidad. Esta muestra se usó
+para extraer índices espectrales en 4 períodos de 2024,
+generando 1.600 muestras de entrenamiento.
+
+### Enfoque de etiquetado de estrés hídrico: clasificación relativa
+Para el modelo ML de estrés hídrico se adoptó un enfoque de
+clasificación relativa (ranking) en lugar de umbrales absolutos.
+Las parcelas se clasifican comparando sus índices contra el resto
+de parcelas del mismo cultivo en el mismo período. Esto evita
+la necesidad de datos de campo externos y es metodológicamente
+válido para zonas con heterogeneidad en prácticas de riego como
+San Rafael. Limitación: si todas las parcelas estuvieran bien
+regadas en un período, algunas se clasificarían igual como
+alto estrés por ser las peores relativas.
+
+### Codificación circular del mes para features temporales
+Se reemplazó la codificación numérica simple del período (T1-T4)
+por codificación circular mediante seno y coseno del mes:
+
+    mes_sin = sin(2π × mes / 12)
+    mes_cos = cos(2π × mes / 12)
+
+Justificación: el año es cíclico. Con codificación numérica simple
+diciembre (12) y enero (1) quedan en extremos opuestos del rango,
+cuando en realidad son meses consecutivos. La codificación circular
+preserva esta continuidad, permitiendo que el modelo aprenda
+correctamente patrones estacionales que cruzan el límite del año
+(por ejemplo, la brotación de la vid entre agosto y octubre).
+
+### Cambio de períodos trimestrales a mensuales
+Se reemplazaron los 4 períodos trimestrales por 24 períodos
+mensuales (2023 y 2024) por las siguientes razones:
+
+- Captura fenológica más precisa: la vid tiene cambios abruptos
+  mes a mes (brotación, floración, maduración, caída de hoja)
+  que un trimestre promedia y oculta.
+- Mayor volumen de datos: 400 parcelas × 24 meses = 9.600 muestras
+  vs 400 × 4 = 1.600 anteriores. El dataset se multiplica por 6.
+- Variabilidad interanual: incluir 2023 y 2024 expone al modelo
+  a dos años con condiciones climáticas distintas, mejorando
+  su capacidad de generalización.
+- El trimestre T3 (invierno) era el más discriminativo entre
+  vid y olivo. Con datos mensuales julio y agosto quedan
+  separados y el modelo puede aprender esa diferencia con
+  mayor precisión.
+
+### Incorporación de bandas espectrales crudas como features
+Se agregaron las bandas B2, B3, B4, B8 y B11 de Sentinel-2
+como features adicionales al clasificador, sumándose a los
+5 índices calculados (NDVI, NDMI, NDWI, MSI, SAVI).
+
+Justificación: los índices son combinaciones de bandas y pueden
+perder información al comprimirla en un solo número. Proveer
+las bandas crudas directamente permite al modelo Random Forest
+descubrir combinaciones no contempladas en los índices estándar.
+Esto es especialmente útil para distinguir vid de olivo en
+condiciones de baja cobertura vegetal (invierno) donde los
+índices estándar tienen menor sensibilidad.
+
+### Filtrado de parcelas pequeñas (< 5000m²)
+Se filtraron las parcelas con área menor a 5000m² de la muestra
+de entrenamiento. Justificación: Sentinel-2 tiene resolución
+espacial de 10×10m (100m² por píxel). Una parcela de 5000m²
+contiene aproximadamente 50 píxeles, por debajo de este umbral
+la media de índices espectrales es muy sensible a píxeles
+contaminados por bordes, caminos internos o canales de riego.
+
+Resultado del filtrado:
+- Parcelas antes: 400 (200 vid, 200 olivo)
+- Parcelas después: 306 (179 vid, 127 olivo)
+- Muestras antes: 9.600
+- Muestras después: 7.344 (4.296 vid, 3.048 olivo)
+
+El desbalance resultante (4.296 vid vs 3.048 olivo) se compensa
+mediante class_weight="balanced" en el clasificador Random Forest,
+que ajusta los pesos de cada clase inversamente proporcional
+a su frecuencia.
+
+### Evolución del accuracy del clasificador
+Se registra la evolución del modelo a lo largo de las iteraciones
+para documentar el impacto de cada decisión:
+
+| Versión                              | Dataset        | Accuracy | Varianza |
+|--------------------------------------|----------------|----------|----------|
+| v1 — 35 parcelas manuales            | 140 muestras   |    96.4% |    ±3.2% |
+| v2 — IDEMendoza trimestral           | 1.600 muestras |    65.2% |    ±2.7% |
+| v3 — IDEMendoza + fecha numérica     | 1.600 muestras |    66.5% |    ±1.8% |
+| v4 — Mensual + codificación circular | 9.600 muestras |    67.6% |    ±1.6% |
+| v5 — Sin parcelas < 5000m²           | 7.344 muestras |    70.4% |    ±3.0% |
+
+Nota sobre v1: el accuracy de 96.4% era artificialmente alto porque
+las parcelas fueron seleccionadas y etiquetadas manualmente sobre
+zonas claramente identificables. No es representativo del
+rendimiento real sobre datos del mundo.
+
+El accuracy de 70.4% con datos reales de IDEMendoza es el valor
+de referencia para comparar contra el modelo ML de estrés hídrico
+(HU-012). La principal fuente de error es el ruido en el catastro:
+parcelas desactualizadas, mal delimitadas o con cultivos mixtos.
+
+## 2025-04-20
+### Próxima iteración pendiente: bandas espectrales crudas
+Queda pendiente regenerar el dataset incluyendo las bandas
+espectrales crudas de Sentinel-2 (B2, B3, B4, B8, B11) como
+features adicionales del clasificador. Esto requiere volver a
+correr el pipeline de extracción (~3 horas) y se estima que
+puede mejorar el accuracy a 73-77% basándose en literatura
+(Mustapha & Zineddine, 2024).

@@ -1,5 +1,6 @@
 import json
 import ee
+import numpy as np
 from app.core.gee import inicializar_gee
 from app.services.images import (
     obtener_geometria_san_rafael,
@@ -12,12 +13,30 @@ from app.services.indices import (
     guardar_resultados,
 )
 
-PERIODOS = [
-    ("2024-01-01", "2024-03-31", "2024-T1"),
-    ("2024-04-01", "2024-06-30", "2024-T2"),
-    ("2024-07-01", "2024-09-30", "2024-T3"),
-    ("2024-10-01", "2024-12-31", "2024-T4"),
-]
+# generar períodos mensuales para 2023 y 2024
+def generar_periodos_mensuales(anios: list) -> list:
+    """Genera lista de períodos mensuales para los años indicados.
+
+    Args:
+        anios: Lista de años a procesar.
+
+    Returns:
+        Lista de tuplas (fecha_inicio, fecha_fin, etiqueta, mes, anio).
+    """
+    periodos = []
+    for anio in anios:
+        for mes in range(1, 13):
+            fecha_inicio = f"{anio}-{mes:02d}-01"
+            if mes == 12:
+                fecha_fin = f"{anio}-12-31"
+            else:
+                import calendar
+                ultimo_dia = calendar.monthrange(anio, mes)[1]
+                fecha_fin = f"{anio}-{mes:02d}-{ultimo_dia}"
+            etiqueta = f"{anio}-M{mes:02d}"
+            periodos.append((fecha_inicio, fecha_fin, etiqueta, mes, anio))
+    return periodos
+
 
 if __name__ == "__main__":
 
@@ -35,8 +54,11 @@ if __name__ == "__main__":
     geometria_sr = obtener_geometria_san_rafael()
     todos_resultados = []
 
-    for fecha_inicio, fecha_fin, etiqueta in PERIODOS:
-        print(f"\nProcesando período {etiqueta} ({fecha_inicio} → {fecha_fin})...")
+    periodos = generar_periodos_mensuales([2023, 2024])
+    print(f"\nPeríodos a procesar: {len(periodos)} meses")
+
+    for fecha_inicio, fecha_fin, etiqueta, mes, anio in periodos:
+        print(f"\nProcesando {etiqueta} ({fecha_inicio} → {fecha_fin})...")
 
         coleccion = obtener_imagenes_sentinel(
             geometria=geometria_sr,
@@ -47,7 +69,7 @@ if __name__ == "__main__":
 
         cantidad = coleccion.size().getInfo()
         if cantidad == 0:
-            print(f"  Sin imágenes disponibles para {etiqueta}, saltando...")
+            print(f"  Sin imágenes disponibles, saltando...")
             continue
 
         print(f"  {cantidad} imágenes disponibles")
@@ -67,15 +89,20 @@ if __name__ == "__main__":
                     geometria_parcela,
                     fecha=etiqueta
                 )
+                # agregar mes y año para codificación circular
+                resultado["mes"] = mes
+                resultado["anio"] = anio
+                resultado["mes_sin"] = round(np.sin(2 * np.pi * mes / 12), 4)
+                resultado["mes_cos"] = round(np.cos(2 * np.pi * mes / 12), 4)
                 resultados_periodo.append(resultado)
             except Exception as e:
                 errores.append(props.get("id", ""))
 
-        print(f"  ✓ {len(resultados_periodo)}/{len(parcelas)} parcelas procesadas")
+        print(f"  ✓ {len(resultados_periodo)}/{len(parcelas)} procesadas")
         if errores:
-            print(f"  Con errores: {len(errores)} parcelas")
+            print(f"  Con errores: {len(errores)}")
 
         todos_resultados.extend(resultados_periodo)
 
-    print(f"\nTotal de muestras generadas: {len(todos_resultados)}")
+    print(f"\nTotal muestras generadas: {len(todos_resultados)}")
     guardar_resultados(todos_resultados, "data/dataset_vid_olivo.csv")
