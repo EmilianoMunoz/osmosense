@@ -208,3 +208,5 @@ automáticamente a partir de los datos de entrenamiento.
 - Huete, A.R. (1988). A soil-adjusted vegetation index (SAVI).
   Remote Sensing of Environment, 25(3), 295-309.
   https://doi.org/10.1016/0034-4257(88)90106-X
+
+  

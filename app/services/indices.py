@@ -48,7 +48,10 @@ def extraer_estadisticas(
         Diccionario con id, nombre, cultivo, fecha y valor medio
         de cada índice (NDVI, NDMI, NDWI, MSI, SAVI).
     """
-    stats = imagen.select(["NDVI", "NDMI", "NDWI", "MSI", "SAVI"]).reduceRegion(
+    stats = imagen.select([
+    "NDVI", "NDMI", "NDWI", "MSI", "SAVI",
+    "B2", "B3", "B4", "B8", "B11"
+    ]).reduceRegion(
         reducer=ee.Reducer.mean(),
         geometry=geometria,
         scale=10,
@@ -65,6 +68,11 @@ def extraer_estadisticas(
         "ndwi":       round(stats.get("NDWI") or 0, 4),
         "msi":        round(stats.get("MSI")  or 0, 4),
         "savi":       round(stats.get("SAVI") or 0, 4),
+        "b2":         round(stats.get("B2")   or 0, 4),
+        "b3":         round(stats.get("B3")   or 0, 4),
+        "b4":         round(stats.get("B4")   or 0, 4),
+        "b8":         round(stats.get("B8")   or 0, 4),
+        "b11":        round(stats.get("B11")  or 0, 4),
     }
 
 
