@@ -10,3 +10,4 @@ build/
 *.tif
 *.csv
 EOF
+data/parcelas/parcelas_ide.geojson
