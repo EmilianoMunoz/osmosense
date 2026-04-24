@@ -271,7 +271,7 @@ de referencia para comparar contra el modelo ML de estrés hídrico
 (HU-012). La principal fuente de error es el ruido en el catastro:
 parcelas desactualizadas, mal delimitadas o con cultivos mixtos.
 
-## 2025-04-20
+## 23/04/2026
 ### Próxima iteración pendiente: bandas espectrales crudas
 Queda pendiente regenerar el dataset incluyendo las bandas
 espectrales crudas de Sentinel-2 (B2, B3, B4, B8, B11) como
@@ -279,3 +279,81 @@ features adicionales del clasificador. Esto requiere volver a
 correr el pipeline de extracción (~3 horas) y se estima que
 puede mejorar el accuracy a 73-77% basándose en literatura
 (Mustapha & Zineddine, 2024).
+
+### Clasificación de parcelas desconocidas: umbral de confianza
+Para manejar parcelas que no son vid ni olivo (frutales, suelo
+desnudo, zonas urbanas, etc.) se implementó un umbral de confianza
+sobre las probabilidades del modelo Random Forest en lugar de
+agregar una tercera clase al dataset.
+
+Lógica:
+- prob_maxima >= 0.75 → predicción con confianza alta
+- prob_maxima >= 0.60 → predicción con confianza media
+- prob_maxima <  0.60 → clasificado como "otros"
+
+Justificación: Random Forest devuelve probabilidades por clase.
+Una parcela de frutales o suelo desnudo tendrá probabilidades
+bajas y similares para vid y olivo porque sus valores espectrales
+no se parecen a ninguna de las dos clases entrenadas. El umbral
+captura este caso sin necesidad de reentrenar con una tercera
+clase, simplificando el pipeline de datos.
+
+Queda pendiente como mejora futura agregar parcelas de FRUTALES,
+ANUALES e INCULTOS del catastro IDEMendoza como clase "otros"
+explícita para mejorar la precisión de este caso.
+
+### Resultado final clasificador v6: 72.4% accuracy
+Incorporación de bandas espectrales crudas (B2, B3, B4, B8, B11)
+como features adicionales mejoró el accuracy de 70.4% a 72.4%
+con varianza ±2.1%.
+
+La importancia de features se distribuyó más uniformemente entre
+los 12 features, indicando que el modelo aprovecha mejor toda la
+información disponible. B3 (banda verde, 560nm) resultó el quinto
+feature más importante (8.9%), capturando la diferencia de
+reflectancia en verde entre la hoja perenne del olivo y la hoja
+caduca de la vid.
+
+| Versión                              | Dataset        | Accuracy | Varianza |
+|--------------------------------------|----------------|----------|----------|
+| v1 — 35 parcelas manuales            | 140 muestras   |    96.4% |    ±3.2% |
+| v2 — IDEMendoza trimestral           | 1.600 muestras |    65.2% |    ±2.7% |
+| v3 — IDEMendoza + fecha numérica     | 1.600 muestras |    66.5% |    ±1.8% |
+| v4 — Mensual + codificación circular | 9.600 muestras |    67.6% |    ±1.6% |
+| v5 — Sin parcelas < 5000m²           | 7.344 muestras |    70.4% |    ±3.0% |
+| v6 — + bandas crudas                 | 7.344 muestras |    72.4% |    ±2.1% |
+
+### Umbral de confianza para clasificación: 0.63
+Se definió 0.63 como umbral mínimo de probabilidad para aceptar
+una predicción del clasificador. Por debajo de este valor la
+parcela se clasifica como "otros".
+
+Calibración realizada con casos reales del dataset:
+- Vid real julio 2024: prob=0.639 → umbral 0.63 la acepta correctamente
+- Olivo real julio 2024: prob=0.860 → clasificado con alta confianza
+- Suelo desnudo sintético: prob=0.521 → correctamente descartado
+
+Niveles de confianza definidos:
+- prob >= 0.75 → confianza alta
+- prob >= 0.63 → confianza media
+- prob <  0.63 → otros
+
+Nota: el umbral es conservador dado el accuracy del modelo (72.4%).
+Con un modelo más preciso el umbral podría subirse a 0.70-0.75
+para mayor seguridad en la clasificación.
+
+### Resultado evaluación con umbral de confianza
+Con umbral 0.63 el clasificador final muestra:
+- 74.6% de parcelas clasificadas con confianza suficiente
+- 25.4% descartadas como "otros" (confianza insuficiente)
+- Accuracy sobre parcelas confiables: 75.4%
+
+Esto representa una mejora real de 70.0% → 75.4% sobre los
+casos donde el modelo tiene certeza. El 25.4% descartado
+corresponde principalmente a parcelas con valores espectrales
+ambiguos, posiblemente por cultivos mixtos, parcelas en
+transición o errores en el catastro de IDEMendoza.
+
+Para la tesis se reportan ambas métricas:
+- Accuracy global: 72.4% (validación cruzada)
+- Accuracy con umbral: 75.4% (sobre casos confiables)

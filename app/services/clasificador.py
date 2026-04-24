@@ -8,7 +8,9 @@ import joblib
 import os
 import numpy as np
 
-FEATURES = ["ndvi", "ndmi", "ndwi", "msi", "savi", "mes_sin", "mes_cos"]
+FEATURES = ["ndvi", "ndmi", "ndwi", "msi", "savi",
+            "b2", "b3", "b4", "b8", "b11",
+            "mes_sin", "mes_cos"]
 TARGET   = "cultivo"
 RUTA_MODELO = "models/clasificador_cultivo.pkl"
 
@@ -144,3 +146,59 @@ def predecir_cultivo(features: dict) -> str:
     X = pd.DataFrame([features])[FEATURES]
     y_pred = modelo.predict(X)
     return le.inverse_transform(y_pred)[0]
+
+def predecir_cultivo_con_umbral(
+    features: dict,
+    umbral_confianza: float = 0.63
+) -> dict:
+    """Predice el tipo de cultivo con umbral de confianza.
+
+    Si la probabilidad máxima de cualquier clase es menor al umbral,
+    la parcela se clasifica como 'otros' en lugar de forzar una
+    clasificación incorrecta.
+
+    Args:
+        features: Diccionario con keys de los features del modelo.
+        umbral_confianza: Probabilidad mínima para aceptar la
+            predicción. Default 0.6.
+
+    Returns:
+        Diccionario con cultivo predicho, probabilidad y confianza.
+
+    Example:
+        >>> resultado = predecir_cultivo_con_umbral({
+        ...     "ndvi": 0.08, "ndmi": -0.18, ...
+        ... })
+        >>> print(resultado)
+        {"cultivo": "vid", "probabilidad": 0.82, "confianza": "alta"}
+    """
+    if not os.path.exists(RUTA_MODELO):
+        raise FileNotFoundError(f"Modelo no encontrado en {RUTA_MODELO}.")
+
+    data   = joblib.load(RUTA_MODELO)
+    modelo = data["modelo"]
+    le     = data["label_encoder"]
+
+    X = pd.DataFrame([features])[FEATURES]
+
+    probabilidades = modelo.predict_proba(X)[0]
+    prob_maxima    = probabilidades.max()
+    clase_idx      = probabilidades.argmax()
+
+    if prob_maxima < umbral_confianza:
+        cultivo    = "otros"
+        confianza  = "baja"
+    elif prob_maxima < 0.75:
+        cultivo    = le.inverse_transform([clase_idx])[0]
+        confianza  = "media"
+    else:
+        cultivo    = le.inverse_transform([clase_idx])[0]
+        confianza  = "alta"
+
+    return {
+        "cultivo":      cultivo,
+        "probabilidad": round(float(prob_maxima), 3),
+        "confianza":    confianza,
+        "prob_vid":     round(float(probabilidades[list(le.classes_).index("vid")]), 3),
+        "prob_olivo":   round(float(probabilidades[list(le.classes_).index("olivo")]), 3),
+    }
