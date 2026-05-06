@@ -58,8 +58,8 @@ def extraer_estadisticas_batch(
         Lista de diccionarios con índices y metadatos por parcela.
     """
     stats = imagen.select([
-        "NDVI", "NDMI", "NDWI", "MSI", "SAVI",
-        "B2", "B3", "B4", "B8", "B11"
+        "NDVI", "NDMI", "NDWI", "MSI", "SAVI", "NDRE",
+        "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B11"
     ]).reduceRegions(
         collection=parcelas_fc,
         reducer=ee.Reducer.mean(),
@@ -84,12 +84,16 @@ def extraer_estadisticas_batch(
             "b2":         round(props.get("B2")   or 0, 4),
             "b3":         round(props.get("B3")   or 0, 4),
             "b4":         round(props.get("B4")   or 0, 4),
+            "b5":         round(props.get("B5")   or 0, 4),
+            "b6":         round(props.get("B6")   or 0, 4),
+            "b7":         round(props.get("B7")   or 0, 4),
             "b8":         round(props.get("B8")   or 0, 4),
             "b11":        round(props.get("B11")  or 0, 4),
             "mes":        mes,
             "anio":       anio,
             "mes_sin":    round(np.sin(2 * np.pi * mes / 12), 4),
             "mes_cos":    round(np.cos(2 * np.pi * mes / 12), 4),
+            "ndre": round(props.get("NDRE") or 0, 4),
         })
     return lista
 

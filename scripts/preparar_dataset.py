@@ -22,13 +22,12 @@ from pyproj import Transformer
 
 # ── configuración ──────────────────────────────────────────────
 RUTA_IDE     = "data/parcelas/parcelas_ide.geojson"
-RUTA_WGS84   = "data/parcelas/san_rafael_vid_olivo_wgs84.geojson"
+RUTA_WGS84   = "data/parcelas/san_rafael_completo_wgs84.geojson"
 RUTA_MUESTRA = "data/parcelas/muestra_entrenamiento.geojson"
 
 MUESTRAS_POR_CLASE = 200
 AREA_MINIMA        = 5000
 RANDOM_SEED        = 42
-CULTIVOS_OTROS     = ("ANUALES", "INCULTOS", "FRUTALES")
 
 MIN_X, MAX_X = -7809842, -7430799
 MIN_Y, MAX_Y = -4300897, -4038340
@@ -36,16 +35,26 @@ MIN_Y, MAX_Y = -4300897, -4038340
 
 # ── funciones ──────────────────────────────────────────────────
 def filtrar_san_rafael_completo(features: list) -> dict:
-    """Filtra todas las parcelas de San Rafael por tipo de cultivo.
+    """Filtra parcelas de San Rafael separando en 4 clases.
+
+    Clases:
+        - vid: viñedos
+        - olivo: olivares
+        - frutales: frutales (espectralmente similares a vid/olivo)
+        - descarte: anuales e incultos (suelo desnudo o cultivos estacionales)
 
     Args:
         features: Lista de features del GeoJSON de IDEMendoza.
 
     Returns:
-        Diccionario con listas de features por clase:
-        'vid', 'olivo', 'otros'.
+        Diccionario con listas de features por clase.
     """
-    resultado = {"vid": [], "olivo": [], "otros": []}
+    resultado = {
+        "vid":      [],
+        "olivo":    [],
+        "frutales": [],
+        "descarte": [],
+    }
 
     for f in features:
         cultivo = f["properties"]["tipo_culti"].strip()
@@ -64,9 +73,12 @@ def filtrar_san_rafael_completo(features: list) -> dict:
             elif cultivo == "OLIVOS":
                 f["properties"]["cultivo"] = "olivo"
                 resultado["olivo"].append(f)
-            elif cultivo in CULTIVOS_OTROS:
-                f["properties"]["cultivo"] = "otros"
-                resultado["otros"].append(f)
+            elif cultivo == "FRUTALES":
+                f["properties"]["cultivo"] = "frutales"
+                resultado["frutales"].append(f)
+            elif cultivo in ("ANUALES", "INCULTOS"):
+                f["properties"]["cultivo"] = "descarte"
+                resultado["descarte"].append(f)
         except Exception:
             continue
 
@@ -113,8 +125,8 @@ def reproyectar_wgs84(features: list) -> list:
     return convertidas
 
 
-def generar_muestra_tres_clases(clases: dict) -> list:
-    """Genera muestra balanceada de tres clases filtrando parcelas pequeñas.
+def generar_muestra_cuatro_clases(clases: dict) -> list:
+    """Genera muestra balanceada de cuatro clases filtrando parcelas pequeñas.
 
     Args:
         clases: Diccionario con listas de features por clase.
@@ -123,7 +135,12 @@ def generar_muestra_tres_clases(clases: dict) -> list:
         Lista de features con muestra balanceada y IDs normalizados.
     """
     muestra_final = []
-    prefijos = {"vid": "V", "olivo": "O", "otros": "X"}
+    prefijos = {
+        "vid":      "V",
+        "olivo":    "O",
+        "frutales": "F",
+        "descarte": "D",
+    }
 
     for clase, features in clases.items():
         validas = [
@@ -161,34 +178,37 @@ def guardar_geojson(features: list, ruta: str) -> None:
 # ── main ───────────────────────────────────────────────────────
 if __name__ == "__main__":
 
-    print("=== Preparación del dataset de entrenamiento ===\n")
+    print("=== Preparación del dataset de entrenamiento (4 clases) ===\n")
 
     print(f"Cargando {RUTA_IDE}...")
     with open(RUTA_IDE) as f:
         data = json.load(f)
     print(f"Total features IDE: {len(data['features'])}")
 
-    print("\nFiltrando San Rafael...")
+    print("\nFiltrando San Rafael (4 clases)...")
     clases = filtrar_san_rafael_completo(data["features"])
     for clase, features in clases.items():
         print(f"  {clase}: {len(features)} parcelas")
 
-    todas = clases["vid"] + clases["olivo"] + clases["otros"]
+    todas = []
+    for features in clases.values():
+        todas.extend(features)
     print(f"\nTotal a reproyectar: {len(todas)}")
 
     print("Reproyectando a WGS84...")
     en_wgs84 = reproyectar_wgs84(todas)
 
     clases_wgs84 = {
-        "vid":   [f for f in en_wgs84 if f["properties"]["cultivo"] == "vid"],
-        "olivo": [f for f in en_wgs84 if f["properties"]["cultivo"] == "olivo"],
-        "otros": [f for f in en_wgs84 if f["properties"]["cultivo"] == "otros"],
+        "vid":      [f for f in en_wgs84 if f["properties"]["cultivo"] == "vid"],
+        "olivo":    [f for f in en_wgs84 if f["properties"]["cultivo"] == "olivo"],
+        "frutales": [f for f in en_wgs84 if f["properties"]["cultivo"] == "frutales"],
+        "descarte": [f for f in en_wgs84 if f["properties"]["cultivo"] == "descarte"],
     }
 
     guardar_geojson(en_wgs84, RUTA_WGS84)
 
     print("\nGenerando muestra de entrenamiento...")
-    muestra = generar_muestra_tres_clases(clases_wgs84)
+    muestra = generar_muestra_cuatro_clases(clases_wgs84)
     guardar_geojson(muestra, RUTA_MUESTRA)
 
     print(f"\nDistribución final:")

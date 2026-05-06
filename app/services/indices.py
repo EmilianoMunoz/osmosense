@@ -10,12 +10,20 @@ def calcular_indices(imagen: ee.Image) -> ee.Image:
     espectrales de Sentinel-2. Todos los índices se agregan como
     bandas adicionales a la imagen original.
 
+    Índices calculados:
+        - NDVI (B8-B4)/(B8+B4): vigor vegetativo general.
+        - NDMI (B8-B11)/(B8+B11): contenido de agua foliar.
+        - NDWI (B3-B8)/(B3+B8): contenido de agua superficial.
+        - MSI B11/B8: estrés hídrico inverso al NDMI.
+        - SAVI 1.5*(B8-B4)/(B8+B4+0.5): NDVI corregido por suelo.
+        - NDRE (B8-B5)/(B8+B5): red-edge, sensible a clorofila
+          y estructura del dosel. Discrimina tipos de vegetación.
+
     Args:
-        imagen: Imagen Sentinel-2 con bandas B3, B4, B8 y B11.
+        imagen: Imagen Sentinel-2 con bandas B3, B4, B5, B8 y B11.
 
     Returns:
-        Imagen original con bandas adicionales: NDVI, NDMI, NDWI,
-        MSI y SAVI.
+        Imagen original con bandas adicionales.
     """
     ndvi = imagen.normalizedDifference(["B8", "B4"]).rename("NDVI")
     ndmi = imagen.normalizedDifference(["B8", "B11"]).rename("NDMI")
@@ -27,7 +35,9 @@ def calcular_indices(imagen: ee.Image) -> ee.Image:
             {"NIR": imagen.select("B8"), "RED": imagen.select("B4")}
         ).rename("SAVI")
     )
-    return imagen.addBands([ndvi, ndmi, ndwi, msi, savi])
+    ndre = imagen.normalizedDifference(["B8", "B5"]).rename("NDRE")
+
+    return imagen.addBands([ndvi, ndmi, ndwi, msi, savi, ndre])
 
 
 def extraer_estadisticas(

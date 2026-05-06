@@ -20,12 +20,12 @@ def obtener_imagenes_sentinel(
     umbral_nubosidad: float = 20.0
 ) -> ee.ImageCollection:
     coleccion = (
-        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-        .filterBounds(geometria)
-        .filterDate(fecha_inicio, fecha_fin)
-        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", umbral_nubosidad))
-        .select(["B2", "B3", "B4", "B8", "B11", "B12"])
-        .sort("CLOUDY_PIXEL_PERCENTAGE")
+    ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+    .filterBounds(geometria)
+    .filterDate(fecha_inicio, fecha_fin)
+    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", umbral_nubosidad))
+    .select(["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B11", "B12"])
+    .sort("CLOUDY_PIXEL_PERCENTAGE")
     )
     return coleccion
 

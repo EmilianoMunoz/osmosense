@@ -8,8 +8,8 @@ import joblib
 import os
 import numpy as np
 
-FEATURES = ["ndvi", "ndmi", "ndwi", "msi", "savi",
-            "b2", "b3", "b4", "b8", "b11",
+FEATURES = ["ndvi", "ndmi", "ndwi", "msi", "savi", "ndre",
+            "b2", "b3", "b4", "b5", "b6", "b7", "b8", "b11",
             "mes_sin", "mes_cos"]
 TARGET   = "cultivo"
 RUTA_MODELO = "models/clasificador_cultivo.pkl"

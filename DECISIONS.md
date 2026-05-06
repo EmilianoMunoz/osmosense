@@ -357,3 +357,168 @@ transición o errores en el catastro de IDEMendoza.
 Para la tesis se reportan ambas métricas:
 - Accuracy global: 72.4% (validación cruzada)
 - Accuracy con umbral: 75.4% (sobre casos confiables)
+
+
+## 06/05/2026
+
+### Incorporación de clase "otros" al clasificador
+Se agregó una tercera clase "otros" al dataset de entrenamiento
+compuesta por parcelas de ANUALES, INCULTOS y FRUTALES del
+catastro IDEMendoza. Justificación: en producción el modelo
+recibe parcelas de cualquier tipo y necesita poder descartarlas
+explícitamente en lugar de forzar una clasificación incorrecta
+entre vid y olivo.
+
+Distribución del dataset actualizado:
+- vid:   200 parcelas × 24 meses = 4.800 muestras
+- olivo: 200 parcelas × 24 meses = 4.800 muestras
+- otros: 200 parcelas × 24 meses = 4.800 muestras
+- Total: 14.400 muestras balanceadas
+
+Fuentes de la clase "otros":
+- ANUALES:  26.339 parcelas disponibles en San Rafael
+- INCULTOS: 18.871 parcelas disponibles en San Rafael
+- FRUTALES:  9.036 parcelas disponibles en San Rafael
+
+Con "otros" como clase explícita el umbral de confianza pasa
+de ser el único mecanismo de descarte a ser una capa adicional
+de seguridad sobre una clasificación ya más robusta.
+
+### Estrategia de ensemble de modelos (recomendación del tutor)
+El tutor recomendó entrenar múltiples modelos de clasificación,
+compararlos y combinarlos para alcanzar un accuracy objetivo
+del 90%. Se decidió evaluar tres modelos:
+
+**Modelo 1 — Random Forest**
+Baseline actual. 100 árboles con votación mayoritaria.
+Robusto con datos ruidosos. Accuracy actual: 72.4%.
+
+**Modelo 2 — Gradient Boosting**
+Construye árboles en secuencia donde cada árbol corrige los
+errores del anterior. Generalmente supera al Random Forest
+en datos tabulares. Parámetros: 100 estimadores, profundidad
+máxima 5, learning rate 0.1.
+
+**Modelo 3 — SVM (Support Vector Machine)**
+Encuentra el hiperplano óptimo que separa las clases en el
+espacio de features. Requiere normalización de datos (Pipeline
+con StandardScaler). Kernel RBF con C=10 y gamma=scale.
+class_weight=balanced para compensar desbalance entre clases.
+
+**Combinaciones a evaluar:**
+- Voting soft entre los 3 modelos
+- Voting soft entre los 2 mejores modelos
+
+Voting soft promedia las probabilidades de cada clase entre
+los modelos participantes, dando más peso a las predicciones
+más confiables que el voting hard (mayoría simple).
+
+El modelo o combinación con mayor accuracy en validación
+cruzada de 5 folds se guardará como clasificador definitivo
+en models/clasificador_cultivo.pkl.
+
+### Script preparar_dataset.py
+Se creó el script scripts/preparar_dataset.py para documentar
+y reproducir todo el proceso de preparación del dataset:
+- Carga parcelas_ide.geojson (IDEMendoza)
+- Filtra San Rafael por bounding box
+- Separa en tres clases: vid, olivo, otros
+- Reproyecta de EPSG:3857 a EPSG:4326
+- Filtra parcelas < 5000m²
+- Genera muestra balanceada de 200 parcelas por clase
+- Exporta muestra_entrenamiento.geojson
+
+Parámetros configurables en el script:
+- MUESTRAS_POR_CLASE = 200
+- AREA_MINIMA = 5000 m²
+- RANDOM_SEED = 42
+
+### Fecha del catastro IDEMendoza: 20 de febrero 2025
+El parcelario de IDEMendoza tiene fecha de creación y última
+edición del 20 de febrero de 2025 (timestamp 1740061366000).
+Las imágenes satelitales utilizadas son de 2023 y 2024, por
+lo que el desfase temporal entre etiquetas e imágenes es de
+menos de 2 años. En la zona vitivinícola de San Rafael los
+cambios de uso de suelo son lentos (reconversión de cultivos
+tarda varios años), por lo que se considera que las etiquetas
+son representativas de las imágenes utilizadas.
+
+### Incorporación de bandas red-edge (B5, B6, B7) y NDRE
+Se agregaron las bandas red-edge de Sentinel-2 (B5 705nm,
+B6 740nm, B7 783nm) y el índice NDRE (Normalized Difference
+Red Edge Index) como features adicionales del clasificador.
+
+Fórmula NDRE: (B8 - B5) / (B8 + B5)
+
+Justificación: las bandas red-edge son más sensibles a
+diferencias en estructura del dosel y contenido de clorofila
+que las bandas visibles e infrarrojo. Se esperaba que ayudaran
+a separar vid de frutales espectralmente.
+
+Resultado: mejora marginal en SVM de 46.0% a 47.2%.
+La incorporación de red-edge no resolvió el problema de
+separabilidad entre vid y frutales.
+
+
+### Problema de separabilidad vid vs frutales
+Se identificó que vid y frutales son espectralmente
+indistinguibles con los features actuales (índices espectrales
++ bandas Sentinel-2 a 10m de resolución). Análisis de la
+matriz de confusión del mejor modelo (SVM):
+
+- Vid clasificada como frutales: 503/960 casos (52%)
+- Frutales clasificados como vid: 75/960 casos (8%)
+
+El solapamiento espectral entre vid y frutales es estructural:
+ambos son cultivos perennes con dosel similar, ciclos
+fenológicos parecidos y reflectancias similares en todas
+las bandas disponibles de Sentinel-2.
+
+Para resolver este problema se necesitaría alguna de las
+siguientes alternativas:
+- Imágenes de mayor resolución espacial (Planetscope 3m)
+- Datos de campo con GPS en parcelas conocidas
+- Imágenes hiperespectrales con más bandas espectrales
+- Información auxiliar como altura del dosel (LiDAR)
+
+### Evolución completa del clasificador — resumen
+
+| Versión | Clases | Dataset | Accuracy |
+|---------|--------|---------|----------|
+| v1 — parcelas manuales | 2 (vid/olivo) | 140 muestras | 96.4% |
+| v2 — IDEMendoza trimestral | 2 | 1.600 muestras | 65.2% |
+| v3 — + fecha numérica | 2 | 1.600 muestras | 66.5% |
+| v4 — mensual + circular | 2 | 9.600 muestras | 67.6% |
+| v5 — sin parcelas < 5000m² | 2 | 7.344 muestras | 70.4% |
+| v6 — + bandas crudas | 2 | 7.344 muestras | 72.4% |
+| v7 — + clase otros | 3 | 14.400 muestras | 57.1% |
+| v8 — 4 clases (vid/olivo/frutales/descarte) | 4 | 19.200 muestras | 46.0% |
+| v9 — + bandas red-edge y NDRE | 4 | 19.200 muestras | 47.2% |
+
+Conclusión: el mejor resultado con datos reales de IDEMendoza
+es 72.4% con 2 clases (vid/olivo). Agregar más clases reduce
+el accuracy por solapamiento espectral entre vid y frutales.
+
+### Objetivo de accuracy 90% — análisis de viabilidad
+El tutor estableció un objetivo de accuracy del 90%. Con los
+datos y features actuales este objetivo no es alcanzable por
+las siguientes razones:
+
+1. Ruido en el catastro IDEMendoza: etiquetas con incertidumbre
+   temporal y espacial.
+2. Resolución espacial de Sentinel-2: píxeles de 10×10m
+   contienen mezcla de cultivos en parcelas pequeñas.
+3. Solapamiento espectral vid/frutales: clases no separables
+   con los índices disponibles.
+
+En literatura académica con datos controlados se reportan
+accuracies de 85-92%. Con datos reales de catastro el rango
+típico es 70-80%.
+
+Próximos pasos a discutir con el tutor:
+- Opción A: aceptar 72.4% con 2 clases como resultado válido
+  y justificarlo con literatura de datos reales
+- Opción B: estrategia de dos modelos en cascada
+  (agrícola/no-agrícola → vid/olivo)
+- Opción C: conseguir datos de campo validados para mejorar
+  la calidad de las etiquetas
