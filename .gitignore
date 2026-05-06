@@ -11,3 +11,10 @@ build/
 *.csv
 EOF
 data/parcelas/*.geojson
+
+# archivos grandes
+data/parcelas/parcelas_ide.geojson
+data/parcelas/san_rafael_completo_wgs84.geojson
+data/parcelas/san_rafael_vid_olivo_wgs84.geojson
+data/*.csv
+models/*.pkl
