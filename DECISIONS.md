@@ -522,3 +522,164 @@ Próximos pasos a discutir con el tutor:
   (agrícola/no-agrícola → vid/olivo)
 - Opción C: conseguir datos de campo validados para mejorar
   la calidad de las etiquetas
+
+
+## 2026-05-08
+### Corrección crítica del pipeline — eliminación de muestras inválidas
+Se detectó que una gran proporción del dataset contenía valores
+espectrales iguales a 0 en todas las bandas e índices. Estas
+muestras provenían de píxeles enmascarados por nubes, parcelas
+fuera de cobertura efectiva, bordes contaminados y geometrías
+sin datos válidos en ciertos meses.
+
+El problema original era que los valores None de GEE se
+reemplazaban por 0:
+    props.get("NDVI") or 0
+
+Esto introducía ruido severo en el espacio espectral y degradaba
+la separabilidad entre clases.
+
+Correcciones aplicadas:
+- Descartar parcelas sin datos válidos en lugar de reemplazar por 0
+- Aplicar máscara real de nubes
+- Usar buffer negativo en geometrías para evitar bordes contaminados
+- Eliminar muestras inválidas antes de persistir el dataset
+
+Resultado:
+- Dataset: 19.200 → 12.752 muestras
+- Accuracy SVM: 47.2% → 57.1%
+- Fuerte reducción de confusión vid ↔ frutales
+
+Conclusión: la principal limitación del clasificador no era el
+modelo sino la calidad del dataset y el ruido espectral
+introducido por muestras inválidas.
+
+## 2026-05-08
+### Mejora en separabilidad vid vs frutales tras limpieza del pipeline
+Tras limpiar el pipeline se observó mejora importante en la
+clasificación de vid.
+
+Comparación SVM antes/después:
+- Recall vid: 0.21 → 0.44
+- Vid clasificada como frutales: 503 → 148 casos
+
+Conclusión: el problema de separabilidad entre vid y frutales
+no era completamente estructural sino amplificado por ruido
+espectral del dataset.
+
+## 2026-05-08
+### Incorporación de estadísticas espaciales por parcela
+El pipeline original usaba únicamente la media espectral
+(Reducer.mean). Se modificó para calcular mean, stdDev, min
+y max sobre todos los índices y bandas.
+
+Ejemplo de nuevas features:
+    ndvi_mean, ndvi_std, ndvi_min, ndvi_max
+
+Justificación: los viñedos presentan mayor heterogeneidad
+espacial (hileras, suelo expuesto, cobertura discontinua)
+mientras que los frutales tienden a generar firmas más
+homogéneas. La desviación estándar y rangos espectrales
+capturan esta diferencia mejor que la media simple, mejorando
+especialmente la separación vid ↔ frutales y vid ↔ descarte.
+
+Estado: dataset regenerándose con nuevas features espaciales.
+
+## 2026-05-08
+### Incorporación de dataset temporal multi-fecha
+Se detectó que usar una única fecha por parcela limitaba la
+capacidad del modelo para capturar diferencias reales entre
+cultivos. Se implementó un pipeline temporal donde cada parcela
+se representa mediante una secuencia anual completa de
+observaciones Sentinel-2.
+
+El nuevo dataset agrupa todas las observaciones históricas por
+parcela y concatena las features temporales generando columnas
+como:
+    ndvi_mean_2023_01, ndvi_std_2023_01,
+    b8_mean_2023_06, savi_mean_2024_10
+
+Cada fila ya no representa una imagen individual sino una
+parcela completa con comportamiento temporal anual.
+
+Resultado:
+- 541 parcelas únicas
+- 530 features temporales
+
+Hipótesis: la evolución temporal anual es más discriminativa
+que una observación aislada, especialmente para separar
+vid ↔ frutales y vid ↔ descarte. Además permite a futuro
+detectar cambios de cultivo mediante comportamiento fenológico
+anómalo.
+
+## 2026-05-08
+### Ampliación masiva del dataset de entrenamiento
+Se amplió la muestra utilizando parcelas IDE de San Rafael con
+filtrado mínimo por superficie (>= 5000m²).
+
+Disponibilidad por clase en San Rafael:
+- vid:      15.447 parcelas
+- olivo:       711 parcelas
+- frutales:  9.036 parcelas
+- descarte: 45.210 parcelas
+
+Muestra balanceada parcial final:
+- vid:      1.000
+- frutales: 1.000
+- descarte: 1.000
+- olivo:      448 (limitación estructural: pocas parcelas reales)
+- Total:    3.448 parcelas
+
+Limitación detectada: en San Rafael existen muy pocas parcelas
+de olivo en la base IDE, por lo que no es posible balancear
+completamente esa clase sin introducir datos artificiales.
+Se mantuvo class_weight="balanced" en los modelos para
+compensar el desbalance natural.
+
+## 2026-05-08
+### Migración de Gradient Boosting clásico a XGBoost
+Se reemplazó GradientBoostingClassifier de sklearn por XGBoost
+por su mejor manejo de datasets tabulares complejos y grandes
+cantidades de features temporales.
+
+Configuración:
+    n_estimators=300, max_depth=6, learning_rate=0.05,
+    subsample=0.8, colsample_bytree=0.8
+
+Resultado: XGBoost superó consistentemente a Random Forest en
+accuracy y validación cruzada. Además provee feature importance
+más interpretables sobre el comportamiento temporal y espectral.
+
+## 2026-05-08
+### Análisis de importancia de variables temporales (XGBoost)
+Las features más relevantes según XGBoost corresponden a:
+- SAVI, NDWI, NDMI, MSI
+- Bandas SWIR/NIR
+- Meses de primavera/verano
+
+Ejemplos de features relevantes:
+    b11_mean_2023_02, savi_mean_2023_10,
+    ndwi_mean_2024_10, ndmi_mean_2023_11
+
+Interpretación: el modelo aprende principalmente patrones de
+comportamiento hídrico, vigor vegetativo, respuesta SWIR y
+estacionalidad fenológica. Confirma que la discriminación entre
+cultivos depende más de patrones temporales completos que de
+una única imagen aislada.
+
+## 2026-05-08
+### Objetivo estratégico del clasificador — detección de cambios
+El clasificador no fue diseñado únicamente para etiquetar
+cultivos actuales. El objetivo principal es que a futuro pueda
+detectar cambios de cultivo, reconversión agrícola, abandono
+de parcelas y reemplazo de especies.
+
+Hipótesis: si una parcela modifica su comportamiento espectral-
+temporal histórico, el modelo detectará inconsistencias respecto
+a la clase original aprendida.
+
+Aplicaciones futuras previstas:
+- Monitoreo agrícola automático
+- Alertas de cambio de uso de suelo
+- Detección de reconversión vid ↔ olivo ↔ frutales
+- Análisis multitemporal automatizado

@@ -19,7 +19,7 @@ if __name__ == "__main__":
     print("=== Entrenamiento del clasificador de cultivos ===\n")
 
     # cargar dataset
-    df = cargar_dataset("data/dataset_vid_olivo.csv")
+    df = cargar_dataset("data/dataset_vid_olivo_verano.csv")
 
     # entrenar
     modelo, le, reporte = entrenar_clasificador(df)

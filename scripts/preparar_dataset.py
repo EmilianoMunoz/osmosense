@@ -25,7 +25,7 @@ RUTA_IDE     = "data/parcelas/parcelas_ide.geojson"
 RUTA_WGS84   = "data/parcelas/san_rafael_completo_wgs84.geojson"
 RUTA_MUESTRA = "data/parcelas/muestra_entrenamiento.geojson"
 
-MUESTRAS_POR_CLASE = 200
+MUESTRAS_POR_CLASE = 1000
 AREA_MINIMA        = 5000
 RANDOM_SEED        = 42
 

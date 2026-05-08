@@ -44,57 +44,121 @@ def extraer_estadisticas_batch(
     """Extrae estadísticas para todas las parcelas en una sola llamada a GEE.
 
     Usa reduceRegions para procesar todas las parcelas del lado del
-    servidor en lugar de una llamada por parcela, reduciendo
-    drásticamente el tiempo de procesamiento.
+    servidor en lugar de una llamada por parcela.
+
+    Además:
+    - descarta parcelas sin datos válidos
+    - evita reemplazar nulls por 0
+    - reduce ruido espectral
 
     Args:
         imagen: Imagen Sentinel-2 con índices calculados.
-        parcelas_fc: FeatureCollection de GEE con todas las parcelas.
-        fecha: Etiqueta del período (ej: '2023-M01').
-        mes: Número de mes (1-12).
-        anio: Año (ej: 2023).
+        parcelas_fc: FeatureCollection de parcelas.
+        fecha: Etiqueta temporal (ej: 2023-M01).
+        mes: Mes numérico.
+        anio: Año.
 
     Returns:
-        Lista de diccionarios con índices y metadatos por parcela.
+        Lista de resultados válidos.
     """
+
+    reducer = (
+        ee.Reducer.mean()
+        .combine(ee.Reducer.stdDev(), sharedInputs=True)
+        .combine(ee.Reducer.min(), sharedInputs=True)
+        .combine(ee.Reducer.max(), sharedInputs=True)
+    )
+
     stats = imagen.select([
         "NDVI", "NDMI", "NDWI", "MSI", "SAVI", "NDRE",
         "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B11"
     ]).reduceRegions(
         collection=parcelas_fc,
-        reducer=ee.Reducer.mean(),
+        reducer=reducer,
         scale=10
     )
 
     resultados_gee = stats.getInfo()
 
     lista = []
+
     for feature in resultados_gee["features"]:
+
         props = feature["properties"]
-        lista.append({
-            "parcela_id": props.get("id", ""),
-            "nombre":     props.get("id", ""),
-            "cultivo":    props.get("cultivo", ""),
-            "fecha":      fecha,
-            "ndvi":       round(props.get("NDVI") or 0, 4),
-            "ndmi":       round(props.get("NDMI") or 0, 4),
-            "ndwi":       round(props.get("NDWI") or 0, 4),
-            "msi":        round(props.get("MSI")  or 0, 4),
-            "savi":       round(props.get("SAVI") or 0, 4),
-            "b2":         round(props.get("B2")   or 0, 4),
-            "b3":         round(props.get("B3")   or 0, 4),
-            "b4":         round(props.get("B4")   or 0, 4),
-            "b5":         round(props.get("B5")   or 0, 4),
-            "b6":         round(props.get("B6")   or 0, 4),
-            "b7":         round(props.get("B7")   or 0, 4),
-            "b8":         round(props.get("B8")   or 0, 4),
-            "b11":        round(props.get("B11")  or 0, 4),
-            "mes":        mes,
-            "anio":       anio,
-            "mes_sin":    round(np.sin(2 * np.pi * mes / 12), 4),
-            "mes_cos":    round(np.cos(2 * np.pi * mes / 12), 4),
-            "ndre": round(props.get("NDRE") or 0, 4),
-        })
+
+        # ─────────────────────────────────────────────
+        # descartar parcelas sin datos válidos
+        # ─────────────────────────────────────────────
+        if (
+            props.get("NDVI_mean") is None or
+            props.get("B8_mean") is None or
+            props.get("B4_mean") is None
+        ):
+            continue
+
+        try:
+
+            resultado = {
+                "parcela_id": props.get("id", ""),
+                "nombre":     props.get("id", ""),
+                "cultivo":    props.get("cultivo", ""),
+                "fecha":      fecha,
+
+                # NDVI
+                "ndvi_mean": round(props.get("NDVI_mean"), 4),
+                "ndvi_std":  round(props.get("NDVI_stdDev"), 4),
+                "ndvi_min":  round(props.get("NDVI_min"), 4),
+                "ndvi_max":  round(props.get("NDVI_max"), 4),
+
+                # NDMI
+                "ndmi_mean": round(props.get("NDMI_mean"), 4),
+                "ndmi_std":  round(props.get("NDMI_stdDev"), 4),
+
+                # NDWI
+                "ndwi_mean": round(props.get("NDWI_mean"), 4),
+                "ndwi_std":  round(props.get("NDWI_stdDev"), 4),
+
+                # MSI
+                "msi_mean": round(props.get("MSI_mean"), 4),
+                "msi_std":  round(props.get("MSI_stdDev"), 4),
+
+                # SAVI
+                "savi_mean": round(props.get("SAVI_mean"), 4),
+                "savi_std":  round(props.get("SAVI_stdDev"), 4),
+
+                # NDRE
+                "ndre_mean": round(props.get("NDRE_mean"), 4),
+                "ndre_std":  round(props.get("NDRE_stdDev"), 4),
+
+                # bandas Sentinel-2
+                "b2_mean":  round(props.get("B2_mean"), 4),
+                "b3_mean":  round(props.get("B3_mean"), 4),
+                "b4_mean":  round(props.get("B4_mean"), 4),
+                "b5_mean":  round(props.get("B5_mean"), 4),
+                "b6_mean":  round(props.get("B6_mean"), 4),
+                "b7_mean":  round(props.get("B7_mean"), 4),
+                "b8_mean":  round(props.get("B8_mean"), 4),
+                "b11_mean": round(props.get("B11_mean"), 4),
+
+                # temporalidad
+                "mes":     mes,
+                "anio":    anio,
+
+                "mes_sin": round(np.sin(2 * np.pi * mes / 12), 4),
+                "mes_cos": round(np.cos(2 * np.pi * mes / 12), 4),
+            }
+
+            lista.append(resultado)
+
+        except Exception:
+            continue
+
+        except Exception as e:
+            print(f"Error procesando parcela: {e}")
+            continue
+
+    print(f"  Parcelas válidas: {len(lista)}")
+
     return lista
 
 
@@ -115,7 +179,7 @@ if __name__ == "__main__":
     # convertir a FeatureCollection de GEE
     parcelas_fc = ee.FeatureCollection([
         ee.Feature(
-            ee.Geometry(f["geometry"]),
+            ee.Geometry(f["geometry"]).buffer(-10),
             f["properties"]
         ) for f in parcelas
     ])
