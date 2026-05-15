@@ -683,3 +683,51 @@ Aplicaciones futuras previstas:
 - Alertas de cambio de uso de suelo
 - Detección de reconversión vid ↔ olivo ↔ frutales
 - Análisis multitemporal automatizado
+
+
+## 15/05/2026
+
+Implementación de clasificador binario (cultivo vs descarte)
+
+Se decidió incorporar una etapa previa de clasificación binaria para separar parcelas útiles (cultivos) de parcelas irrelevantes (descarte), en lugar de abordar directamente el problema multiclase completo.
+
+El modelo original intentaba clasificar simultáneamente:
+
+vid
+frutales
+olivo
+descarte
+
+Esto generaba una complejidad innecesaria, ya que la clase "descarte" introduce alta variabilidad espectral y no responde a un patrón agrícola definido.
+
+Se rediseñó el pipeline en dos etapas:
+
+Clasificador binario:
+cultivo vs descarte
+Clasificador multiclase:
+vid vs frutales vs olivo
+
+El clasificador binario fue implementado utilizando XGBoost con regularización y balanceo de clases mediante scale_pos_weight.
+
+Se introdujo además el uso de probabilidades (predict_proba) en lugar de clasificación directa, permitiendo ajustar manualmente el umbral de decisión (threshold) para optimizar el comportamiento del modelo según el objetivo del sistema.
+
+Se evaluaron distintos valores de threshold:
+
+0.5 (default): comportamiento conservador, mayor pérdida de cultivos
+0.4: mejora en recall de cultivo
+0.3: máximo recall pero incremento significativo de falsos positivos
+0.35: punto de equilibrio
+
+El valor final seleccionado fue:
+
+threshold = 0.35
+
+Resultados obtenidos:
+
+Accuracy: ~0.84
+Validación cruzada: ~0.851 ± 0.012
+Recall cultivo: ~0.93
+
+Esto implica que el modelo detecta aproximadamente el 93% de las parcelas de cultivo reales, minimizando la pérdida de información relevante.
+
+Se observó un aumento en falsos positivos (parcelas de descarte clasificadas como cultivo), lo cual es aceptable dado que estas serán posteriormente filtradas por el modelo multiclase.
