@@ -6,7 +6,7 @@ import os
 def calcular_indices(imagen: ee.Image) -> ee.Image:
     """Calcula índices espectrales sobre una imagen Sentinel-2.
 
-    Calcula NDVI, NDMI, NDWI, MSI y SAVI utilizando las bandas
+    Calcula índices espectrales utilizando las bandas
     espectrales de Sentinel-2. Todos los índices se agregan como
     bandas adicionales a la imagen original.
 
@@ -18,9 +18,16 @@ def calcular_indices(imagen: ee.Image) -> ee.Image:
         - SAVI 1.5*(B8-B4)/(B8+B4+0.5): NDVI corregido por suelo.
         - NDRE (B8-B5)/(B8+B5): red-edge, sensible a clorofila
           y estructura del dosel. Discrimina tipos de vegetación.
+        - GNDVI (B8-B3)/(B8+B3): vigor usando banda verde.
+        - EVI: índice de vegetación mejorado, menos saturable que NDVI.
+        - BSI: índice de suelo desnudo.
+        - NBR (B8-B12)/(B8+B12): sensibilidad a sequedad/biomasa.
+        - MTCI (B6-B5)/(B5-B4): gradiente red-edge.
+        - IRECI (B7-B4)/(B5/B6): clorofila red-edge.
 
     Args:
-        imagen: Imagen Sentinel-2 con bandas B3, B4, B5, B8 y B11.
+        imagen: Imagen Sentinel-2 con bandas B2, B3, B4, B5,
+            B6, B7, B8, B11 y B12.
 
     Returns:
         Imagen original con bandas adicionales.
@@ -36,8 +43,55 @@ def calcular_indices(imagen: ee.Image) -> ee.Image:
         ).rename("SAVI")
     )
     ndre = imagen.normalizedDifference(["B8", "B5"]).rename("NDRE")
+    gndvi = imagen.normalizedDifference(["B8", "B3"]).rename("GNDVI")
+    nbr = imagen.normalizedDifference(["B8", "B12"]).rename("NBR")
+    evi = (
+        imagen.expression(
+            "2.5 * (NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1)",
+            {
+                "NIR": imagen.select("B8"),
+                "RED": imagen.select("B4"),
+                "BLUE": imagen.select("B2"),
+            },
+        ).rename("EVI")
+    )
+    bsi = (
+        imagen.expression(
+            "((SWIR + RED) - (NIR + BLUE)) / ((SWIR + RED) + (NIR + BLUE) + 1e-6)",
+            {
+                "SWIR": imagen.select("B11"),
+                "RED": imagen.select("B4"),
+                "NIR": imagen.select("B8"),
+                "BLUE": imagen.select("B2"),
+            },
+        ).rename("BSI")
+    )
+    mtci = (
+        imagen.expression(
+            "(B6 - B5) / (B5 - B4 + 1e-6)",
+            {
+                "B4": imagen.select("B4"),
+                "B5": imagen.select("B5"),
+                "B6": imagen.select("B6"),
+            },
+        ).rename("MTCI")
+    )
+    ireci = (
+        imagen.expression(
+            "(B7 - B4) / ((B5 / (B6 + 1e-6)) + 1e-6)",
+            {
+                "B4": imagen.select("B4"),
+                "B5": imagen.select("B5"),
+                "B6": imagen.select("B6"),
+                "B7": imagen.select("B7"),
+            },
+        ).rename("IRECI")
+    )
 
-    return imagen.addBands([ndvi, ndmi, ndwi, msi, savi, ndre])
+    return imagen.addBands([
+        ndvi, ndmi, ndwi, msi, savi, ndre,
+        gndvi, evi, bsi, nbr, mtci, ireci,
+    ])
 
 
 def extraer_estadisticas(
@@ -58,32 +112,41 @@ def extraer_estadisticas(
         Diccionario con id, nombre, cultivo, fecha y valor medio
         de cada índice (NDVI, NDMI, NDWI, MSI, SAVI).
     """
-    stats = imagen.select([
-    "NDVI", "NDMI", "NDWI", "MSI", "SAVI",
-    "B2", "B3", "B4", "B8", "B11"
-    ]).reduceRegion(
-        reducer=ee.Reducer.mean(),
+    bandas = [
+        "NDVI", "NDMI", "NDWI", "MSI", "SAVI", "NDRE",
+        "GNDVI", "EVI", "BSI", "NBR", "MTCI", "IRECI",
+        "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B11", "B12",
+    ]
+    stats = imagen.select(bandas).reduceRegion(
+        reducer=(
+            ee.Reducer.mean()
+            .combine(ee.Reducer.stdDev(), sharedInputs=True)
+            .combine(ee.Reducer.minMax(), sharedInputs=True)
+            .combine(ee.Reducer.count(), sharedInputs=True)
+        ),
         geometry=geometria,
         scale=10,
         maxPixels=1e9
     ).getInfo()
 
-    return {
+    resultado = {
         "parcela_id": parcela.get("id", ""),
         "nombre":     parcela.get("nombre") or parcela.get("id", ""),
         "cultivo":    parcela.get("cultivo", ""),
         "fecha":      fecha,
-        "ndvi":       round(stats.get("NDVI") or 0, 4),
-        "ndmi":       round(stats.get("NDMI") or 0, 4),
-        "ndwi":       round(stats.get("NDWI") or 0, 4),
-        "msi":        round(stats.get("MSI")  or 0, 4),
-        "savi":       round(stats.get("SAVI") or 0, 4),
-        "b2":         round(stats.get("B2")   or 0, 4),
-        "b3":         round(stats.get("B3")   or 0, 4),
-        "b4":         round(stats.get("B4")   or 0, 4),
-        "b8":         round(stats.get("B8")   or 0, 4),
-        "b11":        round(stats.get("B11")  or 0, 4),
     }
+
+    for banda in bandas:
+        prefijo = banda.lower()
+        for stat in ["mean", "stdDev", "min", "max", "count"]:
+            key = f"{banda}_{stat}"
+            value = stats.get(key)
+            if value is not None:
+                resultado[f"{prefijo}_{stat}"] = round(value, 4)
+                if stat == "mean":
+                    resultado[prefijo] = round(value, 4)
+
+    return resultado
 
 
 def guardar_resultados(resultados: list, ruta: str = "data/resultados_indices.csv") -> None:

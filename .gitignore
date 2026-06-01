@@ -1,4 +1,3 @@
-cat > .gitignore << EOF
 venv/
 .env
 __pycache__/
@@ -7,14 +6,31 @@ __pycache__/
 .eggs/
 dist/
 build/
+
+# Datos raster y tablas grandes/regenerables
 *.tif
-*.csv
-EOF
+*.tiff
+*.gpkg
+*.parquet
+data/**/*.csv
+data/**/*.geojson
+data/**/*.gpkg
+data/**/*.parquet
+data/logs/
+data/state/
+data/rankings/
+data/auditorias/
+
+# GeoJSON grandes o derivados de IDEMendoza
 data/parcelas/*.geojson
 
-# archivos grandes
-data/parcelas/parcelas_ide.geojson
-data/parcelas/san_rafael_completo_wgs84.geojson
-data/parcelas/san_rafael_vid_olivo_wgs84.geojson
-data/*.csv
+# Modelos binarios grandes. Versionar por Git LFS o release artifact si hace falta.
+models/hidrico_regresion/
+models/**/*.pkl
 models/*.pkl
+
+# Salidas locales de notebooks/herramientas
+.ipynb_checkpoints/
+
+# Documentos académicos locales no operativos
+docs/Anteproyecto*.pdf

@@ -1,733 +1,1942 @@
 # Decisiones Técnicas — Estrés Hídrico San Rafael
 
-## 20/04/2026
-### Fuente de imágenes satelitales: Google Earth Engine (GEE)
-Se evaluaron tres alternativas para acceder a imágenes Sentinel-2:
-- Google Earth Engine (GEE)
-- Copernicus Data Space (CDSE)
-- AWS Open Data (S3)
-
-Se eligió GEE porque el procesamiento ocurre en sus servidores,
-evitando la descarga de imágenes crudas de decenas de GB. El catálogo
-COPERNICUS/S2_SR_HARMONIZED provee reflectancia superficial ya corregida
-atmosféricamente (Level-2A), lista para calcular índices espectrales sin
-preprocesamiento adicional.
-
-## 20/04/2026
-### Tipo de cuenta GEE: Comunidad (no comercial / académica)
-Se eligió el plan Comunidad (150 EECU/mes) por ser suficiente para el
-volumen de datos de la tesis (estimado en 40-55 EECU totales) y no
-requerir cuenta de facturación. El procesamiento principal ocurre
-server-side en GEE, por lo que el consumo local de recursos es mínimo.
-
-## 20/04/2026
-### Colección Sentinel-2: S2_SR_HARMONIZED
-Se eligió COPERNICUS/S2_SR_HARMONIZED sobre S2_SR por incluir
-corrección de inconsistencias radiométricas entre distintas versiones
-del procesador de ESA, garantizando consistencia en series temporales
-largas (2022-2024).
-
-## 20/04/2026
-### Umbral de nubosidad: 20%
-Se definió 20% como umbral inicial de nubosidad basado en práctica
-estándar en teledetección agrícola. San Rafael, Mendoza, es una zona
-árida con baja cobertura nubosa, por lo que este umbral no representa
-una restricción significativa en la disponibilidad de imágenes.
-Puede ajustarse en iteraciones posteriores según necesidad.
-
-## 20/04/2026
-### Bandas seleccionadas de Sentinel-2
-Se seleccionaron 6 de las 13 bandas disponibles:
-- B2 (Blue): clasificación de tipo de cultivo
-- B3 (Green): cálculo de NDWI
-- B4 (Red): cálculo de NDVI
-- B8 (NIR): cálculo de NDVI y NDWI
-- B11 (SWIR-1): detección de estrés hídrico
-- B12 (SWIR-2): detección de estrés hídrico
-
-Las bandas restantes (B1, B5, B6, B7, B8A, B9, B10) fueron descartadas
-por no aportar información relevante para los objetivos del proyecto.
-
-## 20/04/2026
-### Zona geográfica: capa FAO/GAUL/2015/level2
-El polígono del departamento San Rafael se obtiene directamente desde
-la capa administrativa FAO/GAUL incorporada en GEE, filtrando por
-ADM1_NAME = "Mendoza" y ADM2_NAME = "San Rafael". Esto evita la
-necesidad de mantener archivos shapefile externos para la zona base.
-Las parcelas individuales se definirán como GeoJSON propios.
-
-## 20/04/2026
-### Stack tecnológico
-- Lenguaje: Python 3
-- Procesamiento satelital: earthengine-api, geemap
-- Datos geoespaciales: geopandas, shapely, rasterio
-- Backend (fase siguiente): FastAPI, uvicorn
-- Variables de entorno: python-dotenv
-- Análisis de datos: numpy, pandas
-
-Se eligió Python por ser el estándar en proyectos de teledetección,
-machine learning y análisis geoespacial, con amplia disponibilidad
-de librerías especializadas.
-
-## 20/04/2026
-### Estrategia de imagen: mosaico mediano en lugar de imagen individual
-Se reemplazó la selección de imagen individual (coleccion.first()) por
-un mosaico mediano (coleccion.median()) generado a partir de todas las
-imágenes disponibles en el período. Esto garantiza cobertura completa
-del área de interés aunque ninguna imagen individual cubra todas las
-parcelas. La fecha se maneja como rango de referencia del período
-analizado.
-
-## 20/04/2026
-### Índices espectrales seleccionados
-Se definieron 5 índices espectrales basados en revisión de literatura
-reciente (2023-2025) sobre viñedos y olivares con Sentinel-2:
-- NDMI (B8-B11)/(B8+B11): índice principal de estrés hídrico.
-  Detecta cambios en contenido de agua foliar 2-4 semanas antes
-  de síntomas visibles.
-- NDVI (B8-B4)/(B8+B4): vigor general del cultivo. Útil para
-  series temporales y diferenciación entre cultivos.
-- NDWI (B3-B8)/(B3+B8): contenido de agua superficial.
-- MSI B11/B8: estrés hídrico con interpretación inversa al NDMI.
-  Valores más altos indican mayor estrés.
-- SAVI 1.5*(B8-B4)/(B8+B4+0.5): variante del NDVI que corrige
-  el efecto del suelo desnudo, relevante para zonas áridas
-  como San Rafael.
-
-## 20/04/2026
-### Extracción de estadísticas: reduceRegion con escala 10m
-Se utiliza ee.Reducer.mean() con escala de 10 metros (resolución
-nativa de Sentinel-2 para bandas B3, B4, B8) para extraer el valor
-medio de cada índice dentro del polígono de cada parcela. Esto
-produce un vector de features por parcela y fecha, que es la unidad
-de entrada para los modelos ML.
-
-## 20/04/2026
-### Persistencia inicial: CSV
-Los resultados de índices se persisten en CSV como solución inicial
-para desarrollo y pruebas. Se migrará a PostgreSQL + PostGIS cuando
-se integre el backend FastAPI (HU-005 completa con BD en fase
-siguiente).
-
-## 22/04/2026
-### Dataset de clasificación de cultivos
-Se construyó un dataset de 140 muestras para entrenar el clasificador
-de cultivos (vid / olivo) con las siguientes características:
-- 19 parcelas de vid y 16 parcelas de olivo etiquetadas manualmente
-  mediante geojson.io sobre imágenes de Google Earth.
-- 4 períodos temporales (T1-T4 2024) para capturar variabilidad
-  estacional de cada cultivo.
-- Features: NDVI, NDMI, NDWI, MSI, SAVI.
-- Distribución: 76 muestras vid / 64 muestras olivo.
-
-### Etiquetado manual de parcelas
-Las parcelas fueron identificadas visualmente en Google Earth y
-digitalizadas con geojson.io. La distinción entre vid y olivo se
-realizó por patrón visual: hileras rectas y regulares para vid,
-copas redondeadas individuales para olivo. Se etiquetaron cuadros
-individuales dentro de establecimientos, permitiendo que un mismo
-predio tenga múltiples etiquetas de cultivo distintas.
-
-## 22/04/2026
-### Fuente oficial de parcelas: IDEMendoza
-Se reemplazaron las parcelas etiquetadas manualmente por datos
-oficiales obtenidos del portal IDEMendoza (Infraestructura de
-Datos Espaciales de Mendoza):
-https://ide.mendoza.gov.ar
-El dataset provee el parcelario catastral con tipo de cultivo
-por parcela para todo el territorio de Mendoza. Se filtraron
-las parcelas correspondientes al departamento de San Rafael
-con cultivos de vid y olivo.
-
-### Justificación del modelo clasificador vs catastro estático
-El parcelario de IDEMendoza provee etiquetas de cultivo por parcela
-pero con fecha de actualización incierta. El modelo clasificador
-permite detectar discrepancias entre el catastro y el estado
-espectral actual de la parcela, identificando posibles cambios
-de uso de suelo (por ejemplo, reconversión de viñedo a olivar).
-Esto agrega valor al sistema más allá de la clasificación pura,
-habilitando un caso de uso de monitoreo de cambios de cultivo
-a lo largo del tiempo.
-
-Perfecto, exactamente lo esperado (400 parcelas × 4 períodos).
-Antes de seguir con el modelo de estrés, hacemos el commit con todo lo que trabajamos hoy. Primero actualizamos la documentación y después commiteamos.
-
-## 23/04/2026
-### Fuente oficial de parcelas: IDEMendoza
-Se reemplazaron las parcelas etiquetadas manualmente por datos
-oficiales del portal IDEMendoza (Infraestructura de Datos
-Espaciales de Mendoza):
-https://ide.mendoza.gov.ar
-El dataset provee el parcelario catastral con tipo de cultivo
-por parcela para todo Mendoza (216.721 parcelas). Se filtraron
-las correspondientes a San Rafael con cultivos vid y olivo,
-obteniendo 16.158 parcelas (15.447 vid, 711 olivo).
-
-### Sistema de coordenadas: reproyección EPSG:3857 → EPSG:4326
-El GeoJSON de IDEMendoza estaba en proyección Web Mercator
-(EPSG:3857, coordenadas en metros). Se reproyectó a WGS84
-(EPSG:4326, grados decimales) usando pyproj para compatibilidad
-con Google Earth Engine.
-
-### Muestra de entrenamiento: 400 parcelas balanceadas
-Se tomó una muestra aleatoria balanceada de 200 vid y 200 olivo
-con random.seed(42) para reproducibilidad. Esta muestra se usó
-para extraer índices espectrales en 4 períodos de 2024,
-generando 1.600 muestras de entrenamiento.
-
-### Enfoque de etiquetado de estrés hídrico: clasificación relativa
-Para el modelo ML de estrés hídrico se adoptó un enfoque de
-clasificación relativa (ranking) en lugar de umbrales absolutos.
-Las parcelas se clasifican comparando sus índices contra el resto
-de parcelas del mismo cultivo en el mismo período. Esto evita
-la necesidad de datos de campo externos y es metodológicamente
-válido para zonas con heterogeneidad en prácticas de riego como
-San Rafael. Limitación: si todas las parcelas estuvieran bien
-regadas en un período, algunas se clasificarían igual como
-alto estrés por ser las peores relativas.
-
-### Codificación circular del mes para features temporales
-Se reemplazó la codificación numérica simple del período (T1-T4)
-por codificación circular mediante seno y coseno del mes:
-
-    mes_sin = sin(2π × mes / 12)
-    mes_cos = cos(2π × mes / 12)
-
-Justificación: el año es cíclico. Con codificación numérica simple
-diciembre (12) y enero (1) quedan en extremos opuestos del rango,
-cuando en realidad son meses consecutivos. La codificación circular
-preserva esta continuidad, permitiendo que el modelo aprenda
-correctamente patrones estacionales que cruzan el límite del año
-(por ejemplo, la brotación de la vid entre agosto y octubre).
-
-### Cambio de períodos trimestrales a mensuales
-Se reemplazaron los 4 períodos trimestrales por 24 períodos
-mensuales (2023 y 2024) por las siguientes razones:
-
-- Captura fenológica más precisa: la vid tiene cambios abruptos
-  mes a mes (brotación, floración, maduración, caída de hoja)
-  que un trimestre promedia y oculta.
-- Mayor volumen de datos: 400 parcelas × 24 meses = 9.600 muestras
-  vs 400 × 4 = 1.600 anteriores. El dataset se multiplica por 6.
-- Variabilidad interanual: incluir 2023 y 2024 expone al modelo
-  a dos años con condiciones climáticas distintas, mejorando
-  su capacidad de generalización.
-- El trimestre T3 (invierno) era el más discriminativo entre
-  vid y olivo. Con datos mensuales julio y agosto quedan
-  separados y el modelo puede aprender esa diferencia con
-  mayor precisión.
-
-### Incorporación de bandas espectrales crudas como features
-Se agregaron las bandas B2, B3, B4, B8 y B11 de Sentinel-2
-como features adicionales al clasificador, sumándose a los
-5 índices calculados (NDVI, NDMI, NDWI, MSI, SAVI).
-
-Justificación: los índices son combinaciones de bandas y pueden
-perder información al comprimirla en un solo número. Proveer
-las bandas crudas directamente permite al modelo Random Forest
-descubrir combinaciones no contempladas en los índices estándar.
-Esto es especialmente útil para distinguir vid de olivo en
-condiciones de baja cobertura vegetal (invierno) donde los
-índices estándar tienen menor sensibilidad.
-
-### Filtrado de parcelas pequeñas (< 5000m²)
-Se filtraron las parcelas con área menor a 5000m² de la muestra
-de entrenamiento. Justificación: Sentinel-2 tiene resolución
-espacial de 10×10m (100m² por píxel). Una parcela de 5000m²
-contiene aproximadamente 50 píxeles, por debajo de este umbral
-la media de índices espectrales es muy sensible a píxeles
-contaminados por bordes, caminos internos o canales de riego.
-
-Resultado del filtrado:
-- Parcelas antes: 400 (200 vid, 200 olivo)
-- Parcelas después: 306 (179 vid, 127 olivo)
-- Muestras antes: 9.600
-- Muestras después: 7.344 (4.296 vid, 3.048 olivo)
-
-El desbalance resultante (4.296 vid vs 3.048 olivo) se compensa
-mediante class_weight="balanced" en el clasificador Random Forest,
-que ajusta los pesos de cada clase inversamente proporcional
-a su frecuencia.
-
-### Evolución del accuracy del clasificador
-Se registra la evolución del modelo a lo largo de las iteraciones
-para documentar el impacto de cada decisión:
-
-| Versión                              | Dataset        | Accuracy | Varianza |
-|--------------------------------------|----------------|----------|----------|
-| v1 — 35 parcelas manuales            | 140 muestras   |    96.4% |    ±3.2% |
-| v2 — IDEMendoza trimestral           | 1.600 muestras |    65.2% |    ±2.7% |
-| v3 — IDEMendoza + fecha numérica     | 1.600 muestras |    66.5% |    ±1.8% |
-| v4 — Mensual + codificación circular | 9.600 muestras |    67.6% |    ±1.6% |
-| v5 — Sin parcelas < 5000m²           | 7.344 muestras |    70.4% |    ±3.0% |
-
-Nota sobre v1: el accuracy de 96.4% era artificialmente alto porque
-las parcelas fueron seleccionadas y etiquetadas manualmente sobre
-zonas claramente identificables. No es representativo del
-rendimiento real sobre datos del mundo.
-
-El accuracy de 70.4% con datos reales de IDEMendoza es el valor
-de referencia para comparar contra el modelo ML de estrés hídrico
-(HU-012). La principal fuente de error es el ruido en el catastro:
-parcelas desactualizadas, mal delimitadas o con cultivos mixtos.
-
-## 23/04/2026
-### Próxima iteración pendiente: bandas espectrales crudas
-Queda pendiente regenerar el dataset incluyendo las bandas
-espectrales crudas de Sentinel-2 (B2, B3, B4, B8, B11) como
-features adicionales del clasificador. Esto requiere volver a
-correr el pipeline de extracción (~3 horas) y se estima que
-puede mejorar el accuracy a 73-77% basándose en literatura
-(Mustapha & Zineddine, 2024).
-
-### Clasificación de parcelas desconocidas: umbral de confianza
-Para manejar parcelas que no son vid ni olivo (frutales, suelo
-desnudo, zonas urbanas, etc.) se implementó un umbral de confianza
-sobre las probabilidades del modelo Random Forest en lugar de
-agregar una tercera clase al dataset.
-
-Lógica:
-- prob_maxima >= 0.75 → predicción con confianza alta
-- prob_maxima >= 0.60 → predicción con confianza media
-- prob_maxima <  0.60 → clasificado como "otros"
-
-Justificación: Random Forest devuelve probabilidades por clase.
-Una parcela de frutales o suelo desnudo tendrá probabilidades
-bajas y similares para vid y olivo porque sus valores espectrales
-no se parecen a ninguna de las dos clases entrenadas. El umbral
-captura este caso sin necesidad de reentrenar con una tercera
-clase, simplificando el pipeline de datos.
-
-Queda pendiente como mejora futura agregar parcelas de FRUTALES,
-ANUALES e INCULTOS del catastro IDEMendoza como clase "otros"
-explícita para mejorar la precisión de este caso.
-
-### Resultado final clasificador v6: 72.4% accuracy
-Incorporación de bandas espectrales crudas (B2, B3, B4, B8, B11)
-como features adicionales mejoró el accuracy de 70.4% a 72.4%
-con varianza ±2.1%.
-
-La importancia de features se distribuyó más uniformemente entre
-los 12 features, indicando que el modelo aprovecha mejor toda la
-información disponible. B3 (banda verde, 560nm) resultó el quinto
-feature más importante (8.9%), capturando la diferencia de
-reflectancia en verde entre la hoja perenne del olivo y la hoja
-caduca de la vid.
-
-| Versión                              | Dataset        | Accuracy | Varianza |
-|--------------------------------------|----------------|----------|----------|
-| v1 — 35 parcelas manuales            | 140 muestras   |    96.4% |    ±3.2% |
-| v2 — IDEMendoza trimestral           | 1.600 muestras |    65.2% |    ±2.7% |
-| v3 — IDEMendoza + fecha numérica     | 1.600 muestras |    66.5% |    ±1.8% |
-| v4 — Mensual + codificación circular | 9.600 muestras |    67.6% |    ±1.6% |
-| v5 — Sin parcelas < 5000m²           | 7.344 muestras |    70.4% |    ±3.0% |
-| v6 — + bandas crudas                 | 7.344 muestras |    72.4% |    ±2.1% |
-
-### Umbral de confianza para clasificación: 0.63
-Se definió 0.63 como umbral mínimo de probabilidad para aceptar
-una predicción del clasificador. Por debajo de este valor la
-parcela se clasifica como "otros".
-
-Calibración realizada con casos reales del dataset:
-- Vid real julio 2024: prob=0.639 → umbral 0.63 la acepta correctamente
-- Olivo real julio 2024: prob=0.860 → clasificado con alta confianza
-- Suelo desnudo sintético: prob=0.521 → correctamente descartado
-
-Niveles de confianza definidos:
-- prob >= 0.75 → confianza alta
-- prob >= 0.63 → confianza media
-- prob <  0.63 → otros
-
-Nota: el umbral es conservador dado el accuracy del modelo (72.4%).
-Con un modelo más preciso el umbral podría subirse a 0.70-0.75
-para mayor seguridad en la clasificación.
-
-### Resultado evaluación con umbral de confianza
-Con umbral 0.63 el clasificador final muestra:
-- 74.6% de parcelas clasificadas con confianza suficiente
-- 25.4% descartadas como "otros" (confianza insuficiente)
-- Accuracy sobre parcelas confiables: 75.4%
-
-Esto representa una mejora real de 70.0% → 75.4% sobre los
-casos donde el modelo tiene certeza. El 25.4% descartado
-corresponde principalmente a parcelas con valores espectrales
-ambiguos, posiblemente por cultivos mixtos, parcelas en
-transición o errores en el catastro de IDEMendoza.
-
-Para la tesis se reportan ambas métricas:
-- Accuracy global: 72.4% (validación cruzada)
-- Accuracy con umbral: 75.4% (sobre casos confiables)
-
-
-## 06/05/2026
-
-### Incorporación de clase "otros" al clasificador
-Se agregó una tercera clase "otros" al dataset de entrenamiento
-compuesta por parcelas de ANUALES, INCULTOS y FRUTALES del
-catastro IDEMendoza. Justificación: en producción el modelo
-recibe parcelas de cualquier tipo y necesita poder descartarlas
-explícitamente en lugar de forzar una clasificación incorrecta
-entre vid y olivo.
-
-Distribución del dataset actualizado:
-- vid:   200 parcelas × 24 meses = 4.800 muestras
-- olivo: 200 parcelas × 24 meses = 4.800 muestras
-- otros: 200 parcelas × 24 meses = 4.800 muestras
-- Total: 14.400 muestras balanceadas
-
-Fuentes de la clase "otros":
-- ANUALES:  26.339 parcelas disponibles en San Rafael
-- INCULTOS: 18.871 parcelas disponibles en San Rafael
-- FRUTALES:  9.036 parcelas disponibles en San Rafael
-
-Con "otros" como clase explícita el umbral de confianza pasa
-de ser el único mecanismo de descarte a ser una capa adicional
-de seguridad sobre una clasificación ya más robusta.
-
-### Estrategia de ensemble de modelos (recomendación del tutor)
-El tutor recomendó entrenar múltiples modelos de clasificación,
-compararlos y combinarlos para alcanzar un accuracy objetivo
-del 90%. Se decidió evaluar tres modelos:
-
-**Modelo 1 — Random Forest**
-Baseline actual. 100 árboles con votación mayoritaria.
-Robusto con datos ruidosos. Accuracy actual: 72.4%.
-
-**Modelo 2 — Gradient Boosting**
-Construye árboles en secuencia donde cada árbol corrige los
-errores del anterior. Generalmente supera al Random Forest
-en datos tabulares. Parámetros: 100 estimadores, profundidad
-máxima 5, learning rate 0.1.
-
-**Modelo 3 — SVM (Support Vector Machine)**
-Encuentra el hiperplano óptimo que separa las clases en el
-espacio de features. Requiere normalización de datos (Pipeline
-con StandardScaler). Kernel RBF con C=10 y gamma=scale.
-class_weight=balanced para compensar desbalance entre clases.
-
-**Combinaciones a evaluar:**
-- Voting soft entre los 3 modelos
-- Voting soft entre los 2 mejores modelos
-
-Voting soft promedia las probabilidades de cada clase entre
-los modelos participantes, dando más peso a las predicciones
-más confiables que el voting hard (mayoría simple).
-
-El modelo o combinación con mayor accuracy en validación
-cruzada de 5 folds se guardará como clasificador definitivo
-en models/clasificador_cultivo.pkl.
-
-### Script preparar_dataset.py
-Se creó el script scripts/preparar_dataset.py para documentar
-y reproducir todo el proceso de preparación del dataset:
-- Carga parcelas_ide.geojson (IDEMendoza)
-- Filtra San Rafael por bounding box
-- Separa en tres clases: vid, olivo, otros
-- Reproyecta de EPSG:3857 a EPSG:4326
-- Filtra parcelas < 5000m²
-- Genera muestra balanceada de 200 parcelas por clase
-- Exporta muestra_entrenamiento.geojson
-
-Parámetros configurables en el script:
-- MUESTRAS_POR_CLASE = 200
-- AREA_MINIMA = 5000 m²
-- RANDOM_SEED = 42
-
-### Fecha del catastro IDEMendoza: 20 de febrero 2025
-El parcelario de IDEMendoza tiene fecha de creación y última
-edición del 20 de febrero de 2025 (timestamp 1740061366000).
-Las imágenes satelitales utilizadas son de 2023 y 2024, por
-lo que el desfase temporal entre etiquetas e imágenes es de
-menos de 2 años. En la zona vitivinícola de San Rafael los
-cambios de uso de suelo son lentos (reconversión de cultivos
-tarda varios años), por lo que se considera que las etiquetas
-son representativas de las imágenes utilizadas.
-
-### Incorporación de bandas red-edge (B5, B6, B7) y NDRE
-Se agregaron las bandas red-edge de Sentinel-2 (B5 705nm,
-B6 740nm, B7 783nm) y el índice NDRE (Normalized Difference
-Red Edge Index) como features adicionales del clasificador.
-
-Fórmula NDRE: (B8 - B5) / (B8 + B5)
-
-Justificación: las bandas red-edge son más sensibles a
-diferencias en estructura del dosel y contenido de clorofila
-que las bandas visibles e infrarrojo. Se esperaba que ayudaran
-a separar vid de frutales espectralmente.
-
-Resultado: mejora marginal en SVM de 46.0% a 47.2%.
-La incorporación de red-edge no resolvió el problema de
-separabilidad entre vid y frutales.
-
-
-### Problema de separabilidad vid vs frutales
-Se identificó que vid y frutales son espectralmente
-indistinguibles con los features actuales (índices espectrales
-+ bandas Sentinel-2 a 10m de resolución). Análisis de la
-matriz de confusión del mejor modelo (SVM):
-
-- Vid clasificada como frutales: 503/960 casos (52%)
-- Frutales clasificados como vid: 75/960 casos (8%)
-
-El solapamiento espectral entre vid y frutales es estructural:
-ambos son cultivos perennes con dosel similar, ciclos
-fenológicos parecidos y reflectancias similares en todas
-las bandas disponibles de Sentinel-2.
-
-Para resolver este problema se necesitaría alguna de las
-siguientes alternativas:
-- Imágenes de mayor resolución espacial (Planetscope 3m)
-- Datos de campo con GPS en parcelas conocidas
-- Imágenes hiperespectrales con más bandas espectrales
-- Información auxiliar como altura del dosel (LiDAR)
-
-### Evolución completa del clasificador — resumen
-
-| Versión | Clases | Dataset | Accuracy |
-|---------|--------|---------|----------|
-| v1 — parcelas manuales | 2 (vid/olivo) | 140 muestras | 96.4% |
-| v2 — IDEMendoza trimestral | 2 | 1.600 muestras | 65.2% |
-| v3 — + fecha numérica | 2 | 1.600 muestras | 66.5% |
-| v4 — mensual + circular | 2 | 9.600 muestras | 67.6% |
-| v5 — sin parcelas < 5000m² | 2 | 7.344 muestras | 70.4% |
-| v6 — + bandas crudas | 2 | 7.344 muestras | 72.4% |
-| v7 — + clase otros | 3 | 14.400 muestras | 57.1% |
-| v8 — 4 clases (vid/olivo/frutales/descarte) | 4 | 19.200 muestras | 46.0% |
-| v9 — + bandas red-edge y NDRE | 4 | 19.200 muestras | 47.2% |
-
-Conclusión: el mejor resultado con datos reales de IDEMendoza
-es 72.4% con 2 clases (vid/olivo). Agregar más clases reduce
-el accuracy por solapamiento espectral entre vid y frutales.
-
-### Objetivo de accuracy 90% — análisis de viabilidad
-El tutor estableció un objetivo de accuracy del 90%. Con los
-datos y features actuales este objetivo no es alcanzable por
-las siguientes razones:
-
-1. Ruido en el catastro IDEMendoza: etiquetas con incertidumbre
-   temporal y espacial.
-2. Resolución espacial de Sentinel-2: píxeles de 10×10m
-   contienen mezcla de cultivos en parcelas pequeñas.
-3. Solapamiento espectral vid/frutales: clases no separables
-   con los índices disponibles.
-
-En literatura académica con datos controlados se reportan
-accuracies de 85-92%. Con datos reales de catastro el rango
-típico es 70-80%.
-
-Próximos pasos a discutir con el tutor:
-- Opción A: aceptar 72.4% con 2 clases como resultado válido
-  y justificarlo con literatura de datos reales
-- Opción B: estrategia de dos modelos en cascada
-  (agrícola/no-agrícola → vid/olivo)
-- Opción C: conseguir datos de campo validados para mejorar
-  la calidad de las etiquetas
-
-
-## 2026-05-08
-### Corrección crítica del pipeline — eliminación de muestras inválidas
-Se detectó que una gran proporción del dataset contenía valores
-espectrales iguales a 0 en todas las bandas e índices. Estas
-muestras provenían de píxeles enmascarados por nubes, parcelas
-fuera de cobertura efectiva, bordes contaminados y geometrías
-sin datos válidos en ciertos meses.
-
-El problema original era que los valores None de GEE se
-reemplazaban por 0:
-    props.get("NDVI") or 0
-
-Esto introducía ruido severo en el espacio espectral y degradaba
-la separabilidad entre clases.
-
-Correcciones aplicadas:
-- Descartar parcelas sin datos válidos en lugar de reemplazar por 0
-- Aplicar máscara real de nubes
-- Usar buffer negativo en geometrías para evitar bordes contaminados
-- Eliminar muestras inválidas antes de persistir el dataset
+
+## Objetivo Del Producto
+
+Construir un sistema para San Rafael, Mendoza, que permita:
+
+- monitorear parcelas oficiales de vid y olivo;
+- estimar riesgo hídrico satelital relativo;
+- predecir evolución a 5 y 10 días;
+- generar un ranking de prioridad de riesgo/atención;
+- visualizar resultados en dashboard;
+- preparar despliegue posterior en UM-Cloud con PostGIS.
+
+El sistema no usa mediciones de campo de estrés hídrico. El riesgo es un proxy
+satelital relativo construido con Sentinel-2.
+
+## Alcance Geográfico Y Agronómico
+
+El alcance operativo queda limitado a:
+
+```text
+San Rafael, Mendoza
+cultivos: vid y olivo
+fuente de parcelas: IDEMendoza
+```
+
+Decisión vigente:
+
+- para producción sobre parcelas conocidas se usan las etiquetas oficiales del
+  dataset de gobierno;
+- el clasificador de cultivo queda como soporte/experimento para escenarios de
+  expansión o cambio de uso, pero no es el centro del pipeline operativo actual;
+- frutales y no_cultivo no forman parte del producto final.
+
+## Fuente Satelital
+
+Se usa Google Earth Engine con Sentinel-2:
+
+```text
+COPERNICUS/S2_SR_HARMONIZED
+```
+
+Decisiones vigentes:
+
+- imágenes Sentinel-2 Surface Reflectance;
+- composición por ventana corta;
+- filtro de nubosidad configurable, actualmente `--cloud-threshold 35`;
+- estadísticas por parcela vía `reduceRegions`;
+- geometrías en EPSG:4326 para GEE;
+- área calculada en EPSG:3857 para filtros métricos;
+- buffer negativo de `5 m` para reducir contaminación de borde.
+
+Constantes operativas:
+
+```text
+AREA_MINIMA_M2 = 4000
+BUFFER_NEGATIVO_M = 5
+MIN_VALID_PIXELS = 8
+SAN_RAFAEL_BOUNDS = (-69.61384291, -35.52309910, -67.41312966, -34.47910163)
+```
+
+Archivo relevante:
+
+```text
+scripts/recalcular_dataset_desde_ide.py
+```
+
+## Límite Geográfico Local
+
+Decisión vigente:
+
+```text
+No depender de FAO/GAUL para el límite fino de San Rafael.
+```
+
+Se agregó soporte para un GeoJSON local:
+
+```text
+data/limites/san_rafael.geojson
+```
+
+Si ese archivo existe, el sistema lo usa para:
+
+- filtrar parcelas oficiales;
+- construir la región de consulta en GEE;
+- trabajar con un polígono controlado y reproducible.
+
+Si el archivo no existe, se mantiene el fallback por bounding box:
+
+```text
+(-69.61384291, -35.52309910, -67.41312966, -34.47910163)
+```
+
+Archivos modificados:
+
+```text
+app/core/region.py
+app/services/images.py
+scripts/recalcular_dataset_desde_ide.py
+scripts/generar_dataset_temporal_hidrico.py
+docs/limite_san_rafael.md
+```
+
+Estado actual:
+
+```text
+data/limites/san_rafael.geojson existe
+el sistema usa el límite local exacto
+```
+
+El fallback por bounding box queda disponible solo si falta el GeoJSON local.
+
+## Zonificación DGI
+
+Se incorporó la zonificación DGI entregada como:
+
+```text
+data/zonificacion/regional_dgi.csv
+```
+
+Nota técnica:
+
+```text
+El archivo tiene extensión .csv, pero su contenido es un GeoJSON FeatureCollection.
+```
+
+Decisión:
+
+```text
+No usar la zonificación provincial completa directamente.
+Primero recortarla contra data/limites/san_rafael.geojson.
+```
+
+Script reproducible:
+
+```text
+scripts/filtrar_zonificacion_san_rafael.py
+```
+
+Salidas:
+
+```text
+data/zonificacion/regional_dgi_san_rafael.geojson
+data/zonificacion/regional_dgi_san_rafael_resumen.csv
+```
+
+Resultado actual:
+
+```text
+zonas originales: 406
+zonas intersectadas con San Rafael: 97
+Cuenca: 59
+UM: 38
+geometrías fuera del límite > 1 m2: 0
+```
+
+El script también corrige texto con mojibake (`RÃ­o` -> `Río`) y agrega:
+
+```text
+sup_ha_original_calc
+sup_ha_san_rafael
+pct_sup_en_san_rafael
+```
+
+Esta capa queda lista para cruzar posteriormente parcelas/rankings por zona.
+
+Cruce operativo con parcelas:
+
+```text
+scripts/cruzar_parcelas_zonificacion_um.py
+```
+
+Decisión:
+
+```text
+La vista regional operativa usa solo UM con parcelas oficiales vid/olivo.
+No muestra Cuencas como unidad de decisión principal.
+```
+
+Método:
+
+- toma solo geometrías `tipo = UM`;
+- asigna cada parcela a la UM con mayor área de intersección;
+- agrega métricas regionales ponderadas por superficie de parcela;
+- conserva solo UM que tienen cultivos.
+
+Salidas:
+
+```text
+data/zonificacion/parcelas_um.csv
+data/zonificacion/um_con_cultivos.geojson
+data/zonificacion/ranking_um_latest.csv
+```
+
+Resultado actual:
+
+```text
+UM originales: 38
+parcelas oficiales: 10689
+parcelas asignadas a UM: 10667
+UM con cultivos: 34
+parcelas rankeadas en UM: 9660
+```
+
+## Índices Y Variables Satelitales
+
+El dataset temporal usa índices espectrales y bandas Sentinel-2. Variables
+principales:
+
+```text
+NDVI, NDMI, NDWI, MSI, SAVI, NDRE,
+GNDVI, EVI, BSI, NBR, MTCI, IRECI,
+B2, B3, B4, B5, B6, B7, B8, B11, B12
+```
+
+Roles principales:
+
+| Variable      | Uso                                            |
+|---------------|------------------------------------------------|
+| NDMI          | contenido de agua foliar                       |
+| MSI           | estrés/sequedad; valor alto implica más riesgo |
+| NDWI          | agua superficial/dosel                         |
+| NBR           | sequedad/biomasa                               |
+| NDVI          | vigor vegetativo                               |
+| bandas crudas | señal espectral adicional                      |
+
+## Dataset Temporal Operativo
+
+Dataset principal:
+
+```text
+data/dataset_temporal_hidrico.csv
+```
+
+Estado actual:
+
+```text
+filas: 157820
+columnas: 119
+parcelas con historial: 13175
+rango fechas: 2023-01-01 a 2024-12-31
+vid filas: 114192
+olivo filas: 43628
+```
+
+Nota:
+el dataset temporal conserva observaciones históricas generadas antes de adoptar
+el polígono exacto. El ranking operativo filtra esas observaciones contra
+`data/parcelas/san_rafael_vid_olivo_wgs84.geojson`, reconstruido con el límite
+local exacto.
+
+Script principal:
+
+```text
+scripts/generar_dataset_temporal_hidrico.py
+```
+
+Comando base para regenerar/ampliar:
+
+```bash
+venv/bin/python scripts/generar_dataset_temporal_hidrico.py \
+  --reuse-sample \
+  --resume-from-max-date \
+  --output data/dataset_temporal_hidrico.csv \
+  --start-date 2023-01-01 \
+  --end-date 2024-12-31 \
+  --step-days 5 \
+  --window-days 5 \
+  --chunk-size 500
+```
+
+## Clasificación De Cultivos
+
+La clasificación tuvo varias iteraciones, pero el estado vigente se resume así:
+
+1. **Clasificador multiclass plano**
+   - objetivo: clasificar `frutales`, `no_cultivo`, `olivo`, `vid`;
+   - sirvió como benchmark frente al pipeline jerárquico;
+   - quedó movido a `legacy/`;
+   - no forma parte del pipeline operativo actual.
+
+2. **Filtro vid/olivo**
+   - objetivo: quedarse con parcelas compatibles con el dominio final;
+   - fue útil metodológicamente para aislar vid/olivo;
+   - en el flujo actual se reemplaza por etiquetas oficiales IDEMendoza;
+   - queda como referencia histórica en `legacy/`.
+
+Decisión vigente:
+
+```text
+El pipeline operativo no depende de modelos de clasificación.
+Usa parcelas oficiales vid/olivo como universo de análisis.
+```
+
+Motivo:
+
+- el producto final se limita a San Rafael;
+- las parcelas de producción son conocidas;
+- existe dataset oficial con tipo de cultivo;
+- el foco actual es ranking y predicción hídrica, no clasificación general.
+
+Código clasificador histórico:
+
+```text
+legacy/scripts/
+legacy/app/services/
+```
+
+Los modelos `.pkl` de clasificación fueron eliminados del flujo operativo.
+
+## Predictor Hídrico De Regresión
+
+Decisión vigente:
+
+```text
+Se usan modelos de regresión separados por cultivo y horizonte.
+```
+
+Modelos operativos:
+
+```text
+models/hidrico_regresion/regresor_vid_5d_riesgo_hidrico_future_temporal.pkl
+models/hidrico_regresion/regresor_vid_10d_riesgo_hidrico_future_temporal.pkl
+models/hidrico_regresion/regresor_olivo_5d_riesgo_hidrico_future_temporal.pkl
+models/hidrico_regresion/regresor_olivo_10d_riesgo_hidrico_future_temporal.pkl
+```
+
+Script de entrenamiento:
+
+```text
+scripts/experiments/entrenar_predictores_hidricos_regresion.py
+```
+
+Target principal:
+
+```text
+riesgo_hidrico_future
+```
+
+Horizontes:
+
+```text
+5 días
+10 días
+```
+
+Motivo de separar por cultivo:
+
+- vid y olivo tienen fenología diferente;
+- la vid es más estacional y tiene mayor sensibilidad hídrica en verano;
+- el olivo es perenne y más tolerante a sequía;
+- un único modelo mezclaría dinámicas agronómicas distintas.
+
+## Score Hídrico Satelital
+
+El score `riesgo_hidrico` se construye como proxy relativo por cultivo y fecha.
+
+Fórmula:
+
+```text
+R = 100 * (
+      0.35 * P_bajo(NDMI)
+    + 0.30 * P_alto(MSI)
+    + 0.15 * P_bajo(NDWI)
+    + 0.10 * P_bajo(NBR)
+    + 0.10 * P_bajo(NDVI)
+)
+```
+
+Interpretación:
+
+- valores altos implican mayor prioridad relativa;
+- compara parcelas dentro del mismo cultivo y fecha.
+
+Archivo:
+
+```text
+scripts/generar_targets_hidricos_regresion.py
+```
+
+## Métricas Actuales De Regresión
+
+Validación temporal:
+
+| Cultivo | Horizonte | MAE  | RMSE | R2    | Spearman | Top10 overlap |
+|---------|-----------|------|------|-------|----------|---------------|
+| vid     | 5d        | 4.27 | 6.53 | 0.900 | 0.949    | 0.830         |
+| vid     | 10d       | 5.68 | 8.34 | 0.835 | 0.914    | 0.782         |
+| olivo   | 5d        | 3.72 | 5.53 | 0.927 | 0.964    | 0.806         |
+| olivo   | 10d       | 4.75 | 6.98 | 0.883 | 0.940    | 0.766         |
+
+Archivo:
+
+```text
+models/hidrico_regresion/metricas_regresion_temporal.csv
+```
+
+Lectura:
+
+- el error medio está en torno a 3.7-5.7 puntos de score;
+- la correlación ordinal es alta;
+- el modelo sirve mejor para ranking relativo que para prometer exactitud
+  absoluta parcela por parcela.
+
+## Ranking Hídrico
+
+El ranking combina:
+
+- riesgo actual;
+- riesgo predicho a 5 días;
+- riesgo predicho a 10 días;
+- empeoramiento esperado.
+
+Configuración vigente:
+
+```text
+models/ranking_hidrico_config.json
+```
+
+Pesos:
+
+| Componente      | Peso |
+|-----------------|------|
+| riesgo_pred_10d | 0.25 |
+| riesgo_pred_5d  | 0.15 |
+| delta_10d_pos   | 0.30 |
+| delta_5d_pos    | 0.00 |
+| riesgo_actual   | 0.30 |
+
+Umbrales:
+
+| Prioridad | Umbral  |
+|-----------|---------|
+| critica   | >= 55.0 |
+| alta      | >= 47.5 |
+| media     | >= 35.0 |
+| baja      | < 35.0  |
+
+Validación multifecha usada para calibración:
+
+```text
+data/validacion_ranking_hidrico_multifecha_2024.csv
+```
+
+Métricas de calibración:
+
+```text
+spearman_5d: 0.964
+spearman_10d: 0.939
+top10_5d: 0.852
+top10_10d: 0.814
+```
+
+Scripts:
+
+```text
+scripts/generar_ranking_hidrico.py
+scripts/optimizar_ranking_hidrico.py
+scripts/validar_ranking_hidrico_multifecha.py
+```
+
+## Proyección Operativa Para Cliente
+
+Decisión vigente:
+
+```text
+Mantener separadas la predicción ML cruda y la proyección operativa.
+```
+
+Motivo:
+
+- los modelos `riesgo_pred_5d` y `riesgo_pred_10d` aprenden del histórico real;
+- en el histórico puede haber mejoras por riego, lluvia o recuperación entre
+  imágenes;
+- para el cliente se quiere comunicar el escenario conservador de continuidad:
+  si la condición no mejora, el riesgo proyectado debe subir o mantenerse.
+
+Columnas nuevas:
+
+```text
+riesgo_operativo_5d
+riesgo_operativo_10d
+delta_operativo_5d
+delta_operativo_10d
+tendencia_reciente_5d
+pendiente_operativa_5d
+factor_estacional
+```
+
+Reglas:
+
+```text
+riesgo_operativo_5d >= riesgo_actual
+riesgo_operativo_10d >= riesgo_operativo_5d
+riesgo_operativo_5d >= riesgo_pred_5d
+riesgo_operativo_10d >= riesgo_pred_10d
+```
+
+La pendiente operativa toma en cuenta:
+
+- tendencia reciente de la parcela, con más peso en la ventana de 5 días que en
+  la de 10 días;
+- prioridad actual;
+- cultivo (`vid` más sensible que `olivo`);
+- estación del año.
+
+Factores vigentes:
+
+| Factor | Vid | Olivo |
+|--------|-----|-------|
+| cultivo | 1.15 | 0.75 |
+| verano | 1.30 | 1.10 |
+| primavera | 1.15 | 1.00 |
+| otoño | 0.85 | 0.80 |
+| invierno | 0.45 | 0.65 |
+
+Pendiente mínima cada 5 días:
+
+| Prioridad | Puntos |
+|-----------|--------|
+| baja      | 0.5    |
+| media     | 1.5    |
+| alta      | 3.0    |
+| critica   | 4.0    |
+
+Implementación:
+
+```text
+scripts/generar_ranking_hidrico.py
+función: agregar_proyeccion_operativa()
+```
+
+Uso en dashboard:
+
+- admin: muestra predicción ML cruda y campos técnicos;
+- cliente: muestra proyección operativa;
+- no se agrega recomendación automática de riego.
+
+## Estado Actual Del Ranking
+
+Ranking latest:
+
+```text
+data/rankings/ranking_hidrico_latest.csv
+fecha objetivo: 2026-05-26
+parcelas rankeadas: 9679
+vid: 9273
+olivo: 406
+criterio: última observación válida por parcela hasta 15 días hacia atrás
+```
+
+Antigüedad real de lectura:
+
+```text
+0 días: 5148
+5 días: 4528
+10 días: 3
+```
+
+Distribución de prioridad:
+
+| Prioridad | Parcelas |
+|-----------|----------|
+| baja      | 4841     |
+| media     | 2592     |
+| alta      | 1350     |
+| critica   | 896      |
+
+## Cobertura De Parcelas
+
+Universo oficial vid/olivo:
+
+```text
+parcelas oficiales: 10689
+vid: 10126
+olivo: 563
+```
+
+Estado actual:
+
+| Estado                           | Parcelas |
+|----------------------------------|----------|
+| rankeada                         | 9679     |
+| sin_historial                    | 1010     |
+
+Por cultivo:
+
+| Cultivo | Rankeada | Con historial sin latest | Sin historial |
+|---------|----------|--------------------------|---------------|
+| vid     | 9273     | 0                        | 853           |
+| olivo   | 406      | 0                        | 157           |
+
+Cobertura latest:
+
+| Cultivo | Cobertura |
+|---------|-----------|
+| vid     | 91.58%    |
+| olivo   | 72.11%    |
+
+Scripts:
+
+```text
+scripts/auditar_cobertura_parcelas.py
+scripts/auditar_sin_ranking.py
+```
+
+## Auditoría De Parcelas Sin Ranking
+
+Total sin ranking:
+
+```text
+1010
+```
+
+Causas probables:
+
+| Causa                                      | Parcelas |
+|--------------------------------------------|----------|
+| excluida_por_area_menor_4000m2             | 1010     |
+
+Interpretación:
+
+- las 4531 parcelas que antes quedaban afuera por no tener observación exacta
+  en `2026-05-26` ahora se rankean usando su última lectura válida reciente;
+- las 1010 restantes no entran por diseño porque tienen área menor a `4000 m2`.
+
+Evaluación del cambio `5000 -> 4000 m2`:
+
+```text
+parcelas oficiales entre 4000 y 5000 m2: 273
+vid: 235
+olivo: 38
+observaciones latest válidas extraídas: 244
+rankeadas nuevas: 244
+```
+
+Distribución de las 244 nuevas rankeadas:
+
+| Cultivo | Parcelas |
+|---------|----------|
+| vid     | 212      |
+| olivo   | 32       |
+
+| Prioridad | Parcelas |
+|-----------|----------|
+| baja      | 136      |
+| media     | 70       |
+| alta      | 28       |
+| critica   | 10       |
+
+Salidas:
+
+```text
+data/auditoria_sin_ranking_detalle.csv
+data/auditoria_sin_ranking_resumen.csv
+data/auditoria_sin_ranking_detalle.geojson
+```
+
+## Auditoría Espacial Por Vecinos
+
+Se agregó:
+
+```text
+scripts/auditar_vecinos_ranking.py
+```
+
+Objetivo:
+detectar parcelas rankeadas cuyo score difiere demasiado de parcelas vecinas.
+Esto no modifica el ranking; solo marca posibles outliers para revisión.
+
+Parámetros usados:
+
+```text
+vecinos: mismo cultivo
+k: 6
+distancia máxima: 500 m
+mínimo de vecinos para evaluar: 3
+umbral de outlier: 35 puntos contra mediana vecinal
+```
+
+Auditoría sobre `prioridad_score`:
+
+```text
+parcelas rankeadas: 8711
+parcelas evaluables: 7345
+outliers espaciales: 42
+outliers sobre evaluables: 0.57%
+```
+
+Tipos:
+
+```text
+score_mucho_mas_alto_que_vecinos: 29
+score_mucho_mas_bajo_que_vecinos: 13
+```
+
+Auditoría sobre `riesgo_actual`:
+
+```text
+parcelas rankeadas: 8711
+parcelas evaluables: 7345
+outliers espaciales: 482
+outliers sobre evaluables: 6.56%
+```
+
+Tipos:
+
+```text
+score_mucho_mas_alto_que_vecinos: 257
+score_mucho_mas_bajo_que_vecinos: 225
+```
+
+Interpretación:
+
+- el score final calibrado es espacialmente más estable que el riesgo actual;
+- los saltos fuertes que se observan visualmente existen sobre todo en
+  `riesgo_actual`;
+- antes de suavizar conviene usar estos flags como `outlier_espacial` o
+  componente de confianza;
+- no se debe reemplazar el score original sin revisar si el outlier responde a
+  ruido, geometría, sombra/nube o manejo real diferente.
+
+Salidas principales:
+
+```text
+data/auditoria_vecinos_ranking_prioridad_score.csv
+data/auditoria_vecinos_ranking_prioridad_score_resumen.csv
+data/auditoria_vecinos_ranking_prioridad_score.geojson
+data/auditoria_vecinos_ranking_riesgo_actual.csv
+data/auditoria_vecinos_ranking_riesgo_actual_resumen.csv
+data/auditoria_vecinos_ranking_riesgo_actual.geojson
+```
+
+## Auditoría Temporal De Outliers
+
+Se agregó:
+
+```text
+scripts/auditar_outliers_temporales.py
+```
+
+Objetivo:
+tomar los outliers espaciales de `riesgo_actual` y revisar si el salto es
+persistente en el historial de la misma parcela o si parece un evento puntual.
+
+Entradas:
+
+```text
+data/auditoria_vecinos_ranking_riesgo_actual.csv
+data/dataset_temporal_hidrico.csv
+```
+
+Salidas:
+
+```text
+data/auditoria_outliers_temporales.csv
+data/auditoria_outliers_temporales_resumen.csv
+```
 
 Resultado:
-- Dataset: 19.200 → 12.752 muestras
-- Accuracy SVM: 47.2% → 57.1%
-- Fuerte reducción de confusión vid ↔ frutales
 
-Conclusión: la principal limitación del clasificador no era el
-modelo sino la calidad del dataset y el ruido espectral
-introducido por muestras inválidas.
+```text
+outliers auditados: 482
+persistente: 388
+puntual: 68
+sin_historial_reciente: 26
+```
 
-## 2026-05-08
-### Mejora en separabilidad vid vs frutales tras limpieza del pipeline
-Tras limpiar el pipeline se observó mejora importante en la
-clasificación de vid.
+Diagnóstico:
 
-Comparación SVM antes/después:
-- Recall vid: 0.21 → 0.44
-- Vid clasificada como frutales: 503 → 148 casos
+| Diagnóstico                                  | Parcelas |
+|----------------------------------------------|----------|
+| probable_manejo_real_o_condicion_persistente | 346      |
+| indeterminado                                | 65       |
+| probable_ruido_o_lectura_puntual             | 45       |
+| indeterminado_sin_historial_reciente         | 26       |
 
-Conclusión: el problema de separabilidad entre vid y frutales
-no era completamente estructural sino amplificado por ruido
-espectral del dataset.
+La auditoría temporal usa historial reciente ponderado:
 
-## 2026-05-08
-### Incorporación de estadísticas espaciales por parcela
-El pipeline original usaba únicamente la media espectral
-(Reducer.mean). Se modificó para calcular mean, stdDev, min
-y max sobre todos los índices y bandas.
+```text
+t-5 pesa más que t-10
+t-10 pesa más que t-15
+t-15 pesa más que t-20
+```
 
-Ejemplo de nuevas features:
-    ndvi_mean, ndvi_std, ndvi_min, ndvi_max
+Implementación:
 
-Justificación: los viñedos presentan mayor heterogeneidad
-espacial (hileras, suelo expuesto, cobertura discontinua)
-mientras que los frutales tienden a generar firmas más
-homogéneas. La desviación estándar y rangos espectrales
-capturan esta diferencia mejor que la media simple, mejorando
-especialmente la separación vid ↔ frutales y vid ↔ descarte.
+```text
+peso_temporal = 5 / max(dias_previos, 5)
+ventana reciente por defecto: 45 días
+```
 
-Estado: dataset regenerándose con nuevas features espaciales.
+Campos incorporados:
 
-## 2026-05-08
-### Incorporación de dataset temporal multi-fecha
-Se detectó que usar una única fecha por parcela limitaba la
-capacidad del modelo para capturar diferencias reales entre
-cultivos. Se implementó un pipeline temporal donde cada parcela
-se representa mediante una secuencia anual completa de
-observaciones Sentinel-2.
+```text
+historial_reciente_count
+historial_reciente_min_dias
+historial_reciente_max_dias
+riesgo_reciente_weighted_mean
+riesgo_vs_reciente_weighted_mean
+```
 
-El nuevo dataset agrupa todas las observaciones históricas por
-parcela y concatena las features temporales generando columnas
-como:
-    ndvi_mean_2023_01, ndvi_std_2023_01,
-    b8_mean_2023_06, savi_mean_2024_10
+Interpretación:
 
-Cada fila ya no representa una imagen individual sino una
-parcela completa con comportamiento temporal anual.
+- Se ejecutó backfill inicial sobre outliers previos. Tras incorporar parcelas
+  de 4000-5000 m2 aparecieron 26 outliers nuevos sin historial reciente.
+- Hay 346 outliers persistentes con soporte espectral suficiente; no conviene
+  suavizarlos automáticamente porque podrían representar manejo real o una
+  condición sostenida.
+- 45 casos aparecen como probable ruido o lectura puntual bajo las reglas
+  actuales.
+- La mejora prioritaria sigue siendo exponer confianza/diagnóstico y no
+  reemplazar el score automáticamente.
+
+## Pipeline Operativo
+
+Entrada principal:
+
+```text
+scripts/run_pipeline_hidrico.py
+```
+
+Uso local:
+
+```bash
+venv/bin/python scripts/run_pipeline_hidrico.py --mode local
+```
+
+Uso cloud previsto:
+
+```bash
+venv/bin/python scripts/run_pipeline_hidrico.py \
+  --mode cloud \
+  --update-sentinel \
+  --skip-if-no-new-date \
+  --load-postgis
+```
+
+El pipeline:
+
+1. opcionalmente actualiza Sentinel/GEE;
+2. genera ranking latest;
+3. guarda CSV local;
+4. opcionalmente ejecuta auditorías de calidad;
+5. guarda snapshot local de auditorías por fecha;
+6. opcionalmente carga PostGIS.
+
+### Snapshots Históricos De Auditorías
+
+Además de mantener archivos `latest`, el pipeline guarda una copia por fecha en:
+
+```text
+data/auditorias/<fecha_rankeada>/
+```
+
+Para `2024-12-31` quedó:
+
+```text
+data/auditorias/2024-12-31/auditoria_vecinos_ranking_riesgo_actual.csv
+data/auditorias/2024-12-31/auditoria_vecinos_ranking_riesgo_actual_resumen.csv
+data/auditorias/2024-12-31/auditoria_vecinos_ranking_riesgo_actual.geojson
+data/auditorias/2024-12-31/auditoria_outliers_temporales.csv
+data/auditorias/2024-12-31/auditoria_outliers_temporales_resumen.csv
+data/auditorias/2024-12-31/auditoria_ruido_puntual_detalle.csv
+data/auditorias/2024-12-31/auditoria_ruido_puntual_resumen.csv
+data/auditorias/2024-12-31/auditoria_ruido_puntual_detalle.geojson
+data/auditorias/2024-12-31/metadata.json
+```
+
+Motivo:
+
+- los outliers son dinámicos y pueden cambiar en cada fecha Sentinel;
+- `latest` sirve para dashboard operativo;
+- el snapshot por fecha permite comparar recurrencia, desaparición y aparición
+  de outliers a lo largo del tiempo.
+
+Parámetro:
+
+```text
+--audit-history-dir data/auditorias
+```
+
+### Métricas Históricas Por Parcela
+
+Se agregó:
+
+```text
+scripts/generar_metricas_historicas_auditorias.py
+```
+
+Entrada:
+
+```text
+data/auditorias/*/
+```
+
+Salida:
+
+```text
+data/auditoria_metricas_historicas.csv
+```
+
+Campos:
+
+```text
+outlier_count_30d
+persistente_count_30d
+ruido_count_30d
+ultima_fecha_outlier
+ultima_fecha_persistente
+ultima_fecha_ruido
+dias_desde_ultimo_outlier
+dias_desde_ultimo_persistente
+dias_desde_ultimo_ruido
+```
+
+Resultado actual con referencia `2026-05-26` y ventana de 30 días:
+
+```text
+filas: 590
+parcelas con outlier: 590
+parcelas con persistencia: 517
+parcelas con ruido: 59
+```
+
+Interpretación:
+
+- hoy los conteos todavía son simples porque hay pocos snapshots operativos;
+- cuando el pipeline corra sobre nuevas fechas Sentinel, estos campos van a
+  permitir distinguir outliers nuevos de recurrentes;
+- la API local y el dashboard incorporan estas columnas al GeoJSON.
+
+### Modo Ventana Reciente
+
+Se agregó al orquestador:
+
+```text
+--update-recent-window
+--recent-days
+--extract-window-days
+--extract-step-days
+--extract-cloud-threshold
+--extract-output-sample
+--resolve-latest-valid-date / --no-resolve-latest-valid-date
+--latest-lookback-days
+--latest-min-images
+```
+
+Objetivo:
+preparar el pipeline para trabajar con ventanas recientes tipo:
+
+```text
+latest
+latest - 5 días
+latest - 10 días
+```
+
+Uso previsto:
+
+```bash
+venv/bin/python scripts/run_pipeline_hidrico.py \
+  --mode cloud \
+  --update-sentinel \
+  --update-recent-window \
+  --recent-days 10 \
+  --extract-chunk-size 250 \
+  --skip-if-no-new-date
+```
+
+Con `--update-recent-window`, el orquestador llama a:
+
+```text
+scripts/generar_dataset_temporal_hidrico.py
+```
+
+con:
+
+```text
+--all-target-parcels
+--start-date = extract_end_date - recent_days
+--end-date = extract_end_date o fecha actual
+--step-days = 5 por defecto
+--window-days = 5 por defecto
+```
+
+Esto permite asegurar observaciones recientes para auditar saltos temporales,
+sin reextraer todo el histórico.
+
+Resolución de última fecha válida:
+
+```text
+En ejecución real, el pipeline no usa "hoy" directamente.
+Primero consulta GEE hacia atrás hasta encontrar una ventana Sentinel válida.
+Esa fecha se usa como t.
+```
+
+La búsqueda usa:
+
+```text
+lookback: 30 días por defecto
+min_images: 1 por defecto
+cloud_threshold: 35 por defecto
+window_days: 5 por defecto
+```
+
+Si no encuentra una ventana válida, falla explícitamente en vez de generar un
+ranking con una fecha sin imágenes.
+
+Verificación dry-run:
+
+```bash
+venv/bin/python scripts/run_pipeline_hidrico.py \
+  --mode local \
+  --update-sentinel \
+  --update-recent-window \
+  --recent-days 10 \
+  --extract-end-date 2026-05-31 \
+  --extract-chunk-size 250 \
+  --dry-run
+```
+
+Comando GEE generado:
+
+```text
+scripts/generar_dataset_temporal_hidrico.py
+--start-date 2026-05-16
+--end-date 2026-05-26
+--step-days 5
+--window-days 5
+--chunk-size 250
+--cloud-threshold 35.0
+--resume
+--all-target-parcels
+```
+
+Ese rango genera ventanas cerradas hacia atrás:
+
+```text
+2026-05-16 -> 2026-05-21
+2026-05-21 -> 2026-05-26
+2026-05-26 -> 2026-05-31
+```
 
 Resultado:
-- 541 parcelas únicas
-- 530 features temporales
+dry-run OK. No se consultó GEE ni se modificó el dataset. En dry-run se informa
+que no se resuelve `latest` contra GEE y se usa la fecha objetivo provista.
 
-Hipótesis: la evolución temporal anual es más discriminativa
-que una observación aislada, especialmente para separar
-vid ↔ frutales y vid ↔ descarte. Además permite a futuro
-detectar cambios de cultivo mediante comportamiento fenológico
-anómalo.
+Verificación real con GEE sobre la última fecha disponible:
 
-## 2026-05-08
-### Ampliación masiva del dataset de entrenamiento
-Se amplió la muestra utilizando parcelas IDE de San Rafael con
-filtrado mínimo por superficie (>= 5000m²).
+```bash
+venv/bin/python scripts/run_pipeline_hidrico.py \
+  --mode local \
+  --update-sentinel \
+  --update-recent-window \
+  --recent-days 10 \
+  --backfill-outlier-history \
+  --skip-if-no-new-date
+```
 
-Disponibilidad por clase en San Rafael:
-- vid:      15.447 parcelas
-- olivo:       711 parcelas
-- frutales:  9.036 parcelas
-- descarte: 45.210 parcelas
+Resultado operativo:
 
-Muestra balanceada parcial final:
-- vid:      1.000
-- frutales: 1.000
-- descarte: 1.000
-- olivo:      448 (limitación estructural: pocas parcelas reales)
-- Total:    3.448 parcelas
+```text
+fecha objetivo consultada: 2026-05-31
+última ventana Sentinel válida: 2026-05-26 -> 2026-05-31
+imágenes Sentinel válidas: 11
+fecha rankeada: 2026-05-26
+```
 
-Limitación detectada: en San Rafael existen muy pocas parcelas
-de olivo en la base IDE, por lo que no es posible balancear
-completamente esa clase sin introducir datos artificiales.
-Se mantuvo class_weight="balanced" en los modelos para
-compensar el desbalance natural.
+Se incorporaron las ventanas recientes:
 
-## 2026-05-08
-### Migración de Gradient Boosting clásico a XGBoost
-Se reemplazó GradientBoostingClassifier de sklearn por XGBoost
-por su mejor manejo de datasets tabulares complejos y grandes
-cantidades de features temporales.
+```text
+2026-05-16 -> 2026-05-21
+2026-05-21 -> 2026-05-26
+2026-05-26 -> 2026-05-31
+```
 
-Configuración:
-    n_estimators=300, max_depth=6, learning_rate=0.05,
-    subsample=0.8, colsample_bytree=0.8
+El `ranking_hidrico_latest.csv` quedó apuntando a `2026-05-26`.
 
-Resultado: XGBoost superó consistentemente a Random Forest en
-accuracy y validación cruzada. Además provee feature importance
-más interpretables sobre el comportamiento temporal y espectral.
+## API
 
-## 2026-05-08
-### Análisis de importancia de variables temporales (XGBoost)
-Las features más relevantes según XGBoost corresponden a:
-- SAVI, NDWI, NDMI, MSI
-- Bandas SWIR/NIR
-- Meses de primavera/verano
+API mínima:
 
-Ejemplos de features relevantes:
-    b11_mean_2023_02, savi_mean_2023_10,
-    ndwi_mean_2024_10, ndmi_mean_2023_11
+```text
+app/main.py
+app/services/rankings.py
+```
 
-Interpretación: el modelo aprende principalmente patrones de
-comportamiento hídrico, vigor vegetativo, respuesta SWIR y
-estacionalidad fenológica. Confirma que la discriminación entre
-cultivos depende más de patrones temporales completos que de
-una única imagen aislada.
+Endpoints:
 
-## 2026-05-08
-### Objetivo estratégico del clasificador — detección de cambios
-El clasificador no fue diseñado únicamente para etiquetar
-cultivos actuales. El objetivo principal es que a futuro pueda
-detectar cambios de cultivo, reconversión agrícola, abandono
-de parcelas y reemplazo de especies.
+```text
+GET /health
+GET /rankings/latest
+GET /rankings/latest/geojson
+GET /rankings/{fecha}
+GET /clientes
+GET /clientes/{cliente_id}/rankings/latest/geojson
+GET /regional/um/latest
+GET /regional/um/latest/geojson
+GET /regional/um/{um_id}/parcelas/latest/geojson
+```
 
-Hipótesis: si una parcela modifica su comportamiento espectral-
-temporal histórico, el modelo detectará inconsistencias respecto
-a la clase original aprendida.
+Decisión vigente:
 
-Aplicaciones futuras previstas:
-- Monitoreo agrícola automático
-- Alertas de cambio de uso de suelo
-- Detección de reconversión vid ↔ olivo ↔ frutales
-- Análisis multitemporal automatizado
+- si existe `DATABASE_URL`, usa PostGIS;
+- si no existe, usa fallback local CSV/GeoJSON;
+- `/rankings/latest/geojson` devuelve las 10689 parcelas oficiales vid/olivo
+  dentro del límite exacto;
+- parcelas no rankeadas salen como:
 
+```text
+estado_cobertura = sin_ranking_latest
+prioridad = sin ranking
+```
 
-## 15/05/2026
+Esto permite visualización completa del universo oficial sin inventar scores.
 
-Implementación de clasificador binario (cultivo vs descarte)
+### Roles Y Clientes
 
-Se decidió incorporar una etapa previa de clasificación binaria para separar parcelas útiles (cultivos) de parcelas irrelevantes (descarte), en lugar de abordar directamente el problema multiclase completo.
+Decisión:
 
-El modelo original intentaba clasificar simultáneamente:
+```text
+El dashboard se separa en vistas Admin, Cliente y Regional.
+Las vistas cliente deben filtrar parcelas desde backend/PostGIS.
+```
 
-vid
-frutales
-olivo
-descarte
+Roles previstos:
 
-Esto generaba una complejidad innecesaria, ya que la clase "descarte" introduce alta variabilidad espectral y no responde a un patrón agrícola definido.
+```text
+admin
+cliente_particular
+cliente_regional
+regional
+```
 
-Se rediseñó el pipeline en dos etapas:
+Modelo agregado:
 
-Clasificador binario:
-cultivo vs descarte
-Clasificador multiclase:
-vid vs frutales vs olivo
+```text
+clientes
+usuarios
+cliente_parcela
+```
 
-El clasificador binario fue implementado utilizando XGBoost con regularización y balanceo de clases mediante scale_pos_weight.
+Endpoint operativo para cliente:
 
-Se introdujo además el uso de probabilidades (predict_proba) en lugar de clasificación directa, permitiendo ajustar manualmente el umbral de decisión (threshold) para optimizar el comportamiento del modelo según el objetivo del sistema.
+```text
+GET /clientes/{cliente_id}/rankings/latest/geojson
+```
 
-Se evaluaron distintos valores de threshold:
+Comportamiento:
 
-0.5 (default): comportamiento conservador, mayor pérdida de cultivos
-0.4: mejora en recall de cultivo
-0.3: máximo recall pero incremento significativo de falsos positivos
-0.35: punto de equilibrio
+- devuelve solo parcelas asociadas al cliente;
+- conserva parcelas sin ranking latest;
+- en PostGIS filtra por `cliente_parcela`;
+- en fallback local usa `data/clientes/clientes.csv` y
+  `data/clientes/cliente_parcela.csv`.
 
-El valor final seleccionado fue:
+Documentación:
 
-threshold = 0.35
+```text
+docs/roles_clientes.md
+```
 
-Resultados obtenidos:
+Endpoints regionales:
 
-Accuracy: ~0.84
-Validación cruzada: ~0.851 ± 0.012
-Recall cultivo: ~0.93
+- usan PostGIS si existe `DATABASE_URL`;
+- usan fallback local si no existe `DATABASE_URL`;
+- alimentan la vista Regional del dashboard;
+- permiten listar UM, mapear UM y abrir drill-down de parcelas por UM.
 
-Esto implica que el modelo detecta aproximadamente el 93% de las parcelas de cultivo reales, minimizando la pérdida de información relevante.
+Validación API local:
 
-Se observó un aumento en falsos positivos (parcelas de descarte clasificadas como cultivo), lo cual es aceptable dado que estas serán posteriormente filtradas por el modelo multiclase.
+```text
+servidor: uvicorn app.main:app --host 127.0.0.1 --port 8011
+fecha de prueba: 2026-06-01
+```
+
+Resultados:
+
+| Endpoint                                 | Tiempo | Tamaño   | Count |
+|------------------------------------------|--------|----------|-------|
+| `/health`                                | 0.028s | 0.00 MB  | -     |
+| `/rankings/latest?limit=5`               | 0.047s | 0.00 MB  | 5     |
+| `/rankings/latest/geojson`               | 2.307s | 25.15 MB | 10689 |
+| `/regional/um/latest`                    | 0.008s | 0.02 MB  | 34    |
+| `/regional/um/latest/geojson`            | 0.031s | 0.12 MB  | 34    |
+| `/regional/um/0/parcelas/latest/geojson` | 2.118s | 0.14 MB  | 59    |
+| `/clientes`                              | 0.018s | 0.00 MB  | 2     |
+
+Observación:
+
+```text
+El endpoint de parcelas por UM pesa poco, pero tarda porque el fallback local
+arma primero el GeoJSON completo de parcelas y luego filtra.
+```
+
+Mejora pendiente:
+
+```text
+Optimizar /regional/um/{um_id}/parcelas/latest/geojson para leer y cruzar
+solo las parcelas de la UM solicitada.
+```
+
+Mejora aplicada:
+
+```text
+regional_um_parcelas_latest_geojson_from_csv ahora usa
+latest_geojson_subset_from_csv(parcelas_de_la_um)
+```
+
+Ya no construye `/rankings/latest/geojson` completo antes de filtrar.
+
+Medición posterior:
+
+| Endpoint                                  | Tiempo | Tamaño | Parcelas |
+|-------------------------------------------|--------|--------|----------|
+| `/regional/um/0/parcelas/latest/geojson`  | 0.367s | 0.14 MB | 59      |
+| `/regional/um/2/parcelas/latest/geojson`  | 0.427s | 1.32 MB | 565     |
+| `/regional/um/10/parcelas/latest/geojson` | 0.497s | 2.46 MB | 1046    |
+
+## Dashboard
+
+Dashboard:
+
+```text
+streamlit_app.py
+frontend/auth.py
+frontend/constants.py
+frontend/data.py
+frontend/logic.py
+frontend/map.py
+frontend/panels.py
+frontend/views/dashboard.py
+frontend/views/regional.py
+```
+
+Stack:
+
+```text
+Streamlit 1.57.0
+Plotly
+```
+
+Decisiones vigentes:
+
+- mapa interactivo con todas las parcelas oficiales vid/olivo;
+- rankeadas coloreadas por prioridad;
+- no rankeadas en gris;
+- panel de predicción solo para parcelas rankeadas;
+- métricas visibles de evaluadas y sin ranking.
+- login local de desarrollo antes de cargar datos pesados;
+- selector de vista `Admin` / `Cliente` / `Regional` dentro de la sesión;
+- vista cliente filtrada por backend usando relación `cliente_parcela`;
+- vista cliente sin pestaña de revisión técnica.
+- vista regional para validar zonificación DGI recortada a San Rafael;
+- la primera pantalla mantiene accesos rápidos `Cliente vid`, `Cliente olivo`,
+  `Admin` y `Regional` para desarrollo;
+- hay dos clientes demo locales en `data/clientes/`, ambos con parcelas vecinas
+  para simular campos reales.
+- la vista cliente no recomienda riego; muestra detección/proyección de estrés
+  para que el productor tome la decisión con su propio criterio.
+- al cambiar de cliente se limpia la parcela seleccionada y el mapa se centra
+  en el campo visible.
+
+Usuarios demo:
+
+| Usuario  | Contraseña  | Vista         |
+|----------|-------------|---------------|
+| admin    | admin123    | Admin         |
+| finca    | cliente123  | Cliente vid   |
+| olivar   | cliente123  | Cliente olivo |
+| regional | regional123 | Regional DGI  |
+
+Refactor iniciado:
+
+```text
+frontend/
+```
+
+Separación vigente:
+
+- `streamlit_app.py`: entrypoint mínimo;
+- `frontend/auth.py`: login, logout y sesión demo;
+- `frontend/data.py`: carga API/local y normalización;
+- `frontend/logic.py`: reglas testeables;
+- `frontend/map.py`: mapa y hover;
+- `frontend/table_config.py`: columnas visibles, labels y restricciones por rol;
+- `frontend/components/client_overview.py`: estado general del campo en vista cliente;
+- `frontend/components/metrics.py`: métricas resumen;
+- `frontend/components/parcel_detail.py`: detalle y pop-up de parcela;
+- `frontend/components/tables.py`: tablas y resúmenes tabulares;
+- `frontend/components/charts.py`: gráficos;
+- `frontend/panels.py`: fachada de compatibilidad para componentes;
+- `frontend/views/dashboard.py`: composición de la vista.
+- `frontend/views/regional.py`: mapa y tabla de zonificación DGI.
+
+Vista regional:
+
+- consume `data/zonificacion/um_con_cultivos.geojson`;
+- muestra solo UM con parcelas oficiales de vid/olivo;
+- permite filtrar por cuenca, prioridad regional y mínimo de parcelas;
+- permite categorizar por umbrales fijos o por percentiles relativos dentro de
+  las UM visibles;
+- permite colorear por prioridad regional, score promedio, `% alta/crítica` o
+  superficie cultivada;
+- muestra métricas de UM, parcelas, cobertura de ranking y superficie cultivada;
+- muestra tabla `ranking_um` con score regional, riesgo actual, riesgo a 10 días,
+  delta esperado y composición vid/olivo.
+- al seleccionar una UM en el mapa, abre detalle con fecha de ranking, score
+  regional, riesgos agregados, tendencia, composición vid/olivo y cobertura.
+- agrega drill-down `Parcelas de la UM` para ver las parcelas que explican la UM
+  seleccionada, tabla de ranking y mapa filtrado.
+
+Integración pipeline:
+
+```text
+scripts/run_pipeline_hidrico.py --update-zonificacion-um
+```
+
+`--update-zonificacion-um` queda activo por defecto y ejecuta:
+
+```text
+scripts/cruzar_parcelas_zonificacion_um.py
+```
+
+después de generar `ranking_hidrico_latest.csv`.
+
+Para omitirlo:
+
+```text
+--no-update-zonificacion-um
+```
+
+PostGIS regional:
+
+```text
+sql/schema_postgis.sql
+scripts/cargar_zonificacion_um_postgis.py
+```
+
+Tablas:
+
+```text
+zonas_um
+parcela_um
+ranking_um
+```
+
+Vistas:
+
+```text
+ranking_um_latest
+ranking_um_latest_geo
+```
+
+## PostGIS Local
+
+Se agregó entorno local reproducible:
+
+```text
+docker-compose.postgis.yml
+.env.postgis.example
+```
+
+Imagen:
+
+```text
+postgis/postgis:17-3.6-alpine
+```
+
+Nota:
+
+```text
+PostGIS vigente en esta imagen es 3.6; no 1.0.4.
+```
+
+Comandos:
+
+```bash
+docker compose -f docker-compose.postgis.yml up -d
+venv/bin/python scripts/setup_postgis_local.py
+venv/bin/python scripts/validar_postgis_local.py
+```
+
+Scripts agregados:
+
+```text
+scripts/setup_postgis_local.py
+scripts/validar_postgis_local.py
+```
+
+Validación local:
+
+```text
+parcelas: 10689
+ranking_hidrico_latest: 9679
+clientes: 2
+cliente_parcela: 28
+zonas_um: 34
+parcela_um: 10667
+ranking_um_latest: 34
+postgis_version: 3.6 USE_GEOS=1 USE_PROJ=1 USE_STATS=1
+```
+
+Observación:
+
+```text
+Se omitió 1 relación demo cliente-parcela porque la parcela 43241 no existe
+en el universo oficial actual cargado en PostGIS.
+```
+
+Validación API con `DATABASE_URL`:
+
+| Endpoint | Source | Tiempo | Tamaño | Count |
+|----------|--------|--------|--------|-------|
+| `/rankings/latest?limit=5` | postgis | 0.076s | 0.00 MB | 5 |
+| `/regional/um/latest` | postgis | 0.013s | 0.02 MB | 34 |
+| `/regional/um/latest/geojson` | postgis | 0.076s | 0.07 MB | 34 |
+| `/regional/um/0/parcelas/latest/geojson` | postgis | 0.036s | 0.07 MB | 59 |
+| `/clientes` | postgis | 0.012s | 0.00 MB | 2 |
+
+Optimización del mapa admin:
+
+```text
+data/parcelas/san_rafael_vid_olivo_dashboard.geojson
+scripts/generar_geojson_dashboard_parcelas.py
+```
+
+Decisión:
+
+- mantener `data/parcelas/san_rafael_vid_olivo_wgs84.geojson` como geometría
+  operativa/catastral;
+- usar el GeoJSON `dashboard` como geometría preferida para visualización;
+- simplificar geometrías con tolerancia de 2 m;
+- conservar solo `fid`, `cultivo`, `area_m2` y geometría en ese archivo;
+- enviar a Plotly solo geometría + `parcela_id`; el hover usa el DataFrame.
+
+Resultado:
+
+```text
+GeoJSON parcelas original: 7.52 MB
+GeoJSON dashboard: 4.42 MB
+GeoJSON usado por Plotly: 3.45 MB
+reducción efectiva frente al payload completo del mapa: 86.3%
+```
+
+Tests frontend agregados:
+
+```text
+tests/test_frontend_logic.py
+```
+
+Validan:
+
+- cliente usa `riesgo_operativo_*`;
+- admin usa `riesgo_pred_*`;
+- la prioridad relativa no modifica `prioridad_score`;
+- el hover del cliente usa proyección operativa;
+- cliente no expone columnas técnicas en tabla;
+- admin conserva columnas técnicas y predicciones crudas;
+- las columnas visibles usan labels legibles;
+- el estado general del campo usa la proyección operativa;
+- el selector de parcela del cliente no muestra ranking ni score;
+- el hover del mapa cliente no muestra ranking, score ni campos técnicos.
+
+Ejecución:
+
+```bash
+venv/bin/streamlit run streamlit_app.py
+```
+
+## PostGIS Y Cloud
+
+Decisión:
+
+```text
+PostGIS será el storage geoespacial operativo.
+```
+
+Archivos:
+
+```text
+sql/schema_postgis.sql
+scripts/aplicar_schema_postgis.py
+scripts/cargar_parcelas_postgis.py
+scripts/cargar_ranking_postgis.py
+scripts/cargar_clientes_parcelas_postgis.py
+docs/postgis.md
+```
+
+UM-Cloud:
+
+```text
+docs/UM_Cloud_Setup_Guide.md
+docs/arquitectura_cloud_pipeline.md
+```
+
+Estado:
+
+- schema y scripts preparados;
+- carga integrada al orquestador;
+- despliegue completo queda para cuando el flujo local esté estable.
+
+## Artefactos Operativos
+
+Mantener:
+
+```text
+data/parcelas/parcelas_ide.geojson
+data/parcelas/san_rafael_vid_olivo_wgs84.geojson
+data/parcelas/muestra_temporal_full_vid_olivo.geojson
+data/dataset_temporal_hidrico.csv
+data/rankings/ranking_hidrico_latest.csv
+models/ranking_hidrico_config.json
+models/hidrico_regresion/*.pkl
+models/hidrico_regresion/metricas_regresion_temporal.csv
+```
+
+No versionar en Git:
+
+- CSV grandes;
+- GeoJSON derivados;
+- modelos `.pkl`;
+- rankings;
+- logs;
+- state local.
+
+Esto está cubierto por `.gitignore`.
+
+## Código Legacy
+
+Se creó:
+
+```text
+legacy/
+```
+
+Objetivo:
+
+- conservar historia técnica;
+- evitar confusión en `scripts/`;
+- no borrar código que puede servir para la memoria o comparación.
+
+No usar `legacy/` en el flujo operativo actual sin revisar paths y artefactos.
+
+Inventario:
+
+```text
+docs/inventario_codigo.md
+```
+
+## Tests Y Verificación
+
+Tests mínimos:
+
+```text
+tests/test_rankings.py
+```
+
+Comando:
+
+```bash
+venv/bin/python -m unittest discover -s tests -v
+```
+
+Último resultado:
+
+```text
+22 tests OK
+```
+
+Verificación mínima de pipeline:
+
+```bash
+venv/bin/python scripts/run_pipeline_hidrico.py --mode local --dry-run
+```
+
+Verificación con auditorías de calidad:
+
+```bash
+venv/bin/python scripts/run_pipeline_hidrico.py --mode local --run-quality-audits
+```
+
+Verificación con backfill inicial de outliers:
+
+```bash
+venv/bin/python scripts/run_pipeline_hidrico.py \
+  --mode local \
+  --backfill-outlier-history \
+  --dry-run
+```
+
+## Auditoría De Calidad Del Ranking
+
+El pipeline puede ejecutar auditorías posteriores al ranking con:
+
+```bash
+venv/bin/python scripts/run_pipeline_hidrico.py --mode local --run-quality-audits
+```
+
+Esto agrega dos controles sobre la lectura actual:
+
+- auditoría espacial por vecinos cercanos usando `riesgo_actual`;
+- auditoría temporal de los outliers espaciales contra el historial disponible.
+
+Archivos generados:
+
+```text
+data/auditoria_vecinos_ranking_riesgo_actual.csv
+data/auditoria_vecinos_ranking_riesgo_actual_resumen.csv
+data/auditoria_vecinos_ranking_riesgo_actual.geojson
+data/auditoria_outliers_temporales.csv
+data/auditoria_outliers_temporales_resumen.csv
+```
+
+Última ejecución local:
+
+```text
+ranking latest: 2026-05-26
+parcelas oficiales vid/olivo: 10689
+rankeadas: 9679
+sin ranking: 1010
+outliers espaciales sobre riesgo_actual: 590
+outliers evaluables: 8237
+outliers/evaluables: 7.16%
+```
+
+Distribución de ranking:
+
+```text
+baja: 4841
+media: 2592
+alta: 1350
+critica: 896
+```
+
+Diagnóstico temporal de los 590 outliers:
+
+```text
+persistente: 517
+puntual: 73
+
+indeterminado: 350
+probable_manejo_real_o_condicion_persistente: 181
+probable_ruido_o_lectura_puntual: 59
+```
+
+Backfill inicial:
+
+```bash
+venv/bin/python scripts/run_pipeline_hidrico.py \
+  --mode local \
+  --backfill-outlier-history
+```
+
+Con `fecha_rankeada = 2026-05-26`, el pipeline arma:
+
+```text
+outliers objetivo: 590
+start: 2026-04-11
+end: 2026-05-21
+step: 5 días
+window: 5 días
+```
+
+Resultado del backfill ejecutado:
+
+```text
+filas antes: 187225
+filas después del guardado parcial: 189481
+observaciones válidas finales: 188909
+outliers con historial ponderado: 590
+```
+
+Esto rellena historia reciente previa a `latest` para poder distinguir:
+
+```text
+salto puntual
+condición persistente
+probable ruido de lectura
+```
+
+Regla de ponderación temporal:
+
+```text
+peso_temporal = 5 / max(dias_previos, 5)
+```
+
+Ejemplos:
+
+```text
+t-5  -> peso 1.00
+t-10 -> peso 0.50
+t-15 -> peso 0.33
+t-20 -> peso 0.25
+```
+
+La API local (`app/services/rankings.py`) incorpora estos campos al GeoJSON cuando los CSV existen:
+
+```text
+outlier_espacial
+tipo_outlier_espacial
+neighbor_count
+neighbor_riesgo_actual_median
+riesgo_actual_vs_neighbor_median
+persistencia_temporal
+diagnostico_outlier
+historial_reciente_count
+riesgo_reciente_weighted_mean
+riesgo_vs_reciente_weighted_mean
+motivo_ruido
+severidad_ruido
+accion_recomendada
+confianza_lectura
+confianza_motivo
+fecha_lectura
+dias_desde_lectura
+```
+
+Criterio de `confianza_lectura`:
+
+```text
+alta: lectura normal reciente o outlier persistente con soporte temporal
+media: lectura de 6 a 10 días, outlier espacial indeterminado o pocos vecinos
+baja: lectura de más de 10 días o probable ruido/lectura puntual
+sin_ranking: parcela oficial sin ranking latest
+```
+
+Distribución actual:
+
+```text
+alta: 7827
+media: 1793
+baja: 59
+sin_ranking: 1010
+```
+
+El dashboard muestra estos campos en métricas, hover del mapa, filtro de confianza, panel de parcela y tabla de ranking.
+
+Mejora de revisión incorporada:
+
+```text
+filtros operativos por cultivo, prioridad, confianza y ranking
+selector de color del mapa: prioridad / confianza
+switch técnico "Solo casos a revisar"
+panel "Casos a revisar"
+```
+
+Decisión UX:
+
+```text
+diagnostico_outlier, motivo_ruido y accion_recomendada no son filtros
+principales del usuario final.
+```
+
+Motivo:
+
+- son señales técnicas para explicar la decisión y auditar calidad;
+- el usuario operativo debe ver prioridad, confianza y recomendación resumida;
+- los campos técnicos quedan disponibles en detalle de parcela, revisión y datos.
+
+Mejora de usabilidad:
+
+```text
+dashboard organizado en pestañas:
+- Estado
+- Mapa operativo
+- Revisión técnica
+- Cobertura
+- Datos
+```
+
+Decisión de performance para admin:
+
+```text
+La vista admin no carga todas las prioridades por defecto.
+El mapa operativo inicia con prioridad alta + crítica.
+```
+
+Resultado actual:
+
+```text
+parcelas totales: 10689
+parcelas visibles por defecto en admin: 2242
+alta: 1348
+critica: 894
+```
+
+El usuario puede activar `Mostrar todas las prioridades` para cargar el universo
+completo cuando lo necesite.
+
+El mapa permite seleccionar una parcela. Al seleccionar una parcela se abre un
+detalle con:
+
+```text
+riesgo actual
+proyección 5 días
+proyección 10 días
+ranking
+confianza de lectura
+diagnóstico
+motivo de la lectura
+criterio técnico de auditoría
+historial de outliers 30d
+```
+
+Categorización visual:
+
+```text
+Umbrales fijos:
+  usa la prioridad guardada por el ranking.
+
+Relativa por percentiles:
+  crítica = top 10% por score dentro de la fecha
+  alta    = siguiente 20%
+  media   = siguiente 30%
+  baja    = resto evaluado
+```
+
+La categorización relativa es solo visual en el dashboard; no modifica:
+
+```text
+prioridad_score
+ranking_global
+ranking_por_cultivo
+prioridad guardada
+```
+
+El panel "Casos a revisar" prioriza:
+
+```text
+1. revisar_visual_antes_de_suavizar
+2. bajar_confianza_y_revisar_geometria
+3. bajar_confianza_no_suavizar_score
+4. mantener_alerta
+5. otros outliers espaciales
+```
+
+Cantidad actual de casos de revisión visibles con todos los filtros abiertos:
+
+```text
+464
+```
+
+### Auditoría Específica De Ruido Puntual
+
+Se agregó:
+
+```text
+scripts/auditar_ruido_puntual.py
+```
+
+Objetivo:
+analizar únicamente los casos `probable_ruido_o_lectura_puntual` para decidir
+si conviene suavizar, bajar confianza o revisar geometría.
+
+Salidas:
+
+```text
+data/auditoria_ruido_puntual_detalle.csv
+data/auditoria_ruido_puntual_resumen.csv
+data/auditoria_ruido_puntual_detalle.geojson
+```
+
+Resultado actual:
+
+```text
+casos: 59
+```
+
+Por motivo:
+
+| Motivo                                     | Parcelas |
+|--------------------------------------------|----------|
+| sin_soporte_espectral_y_sin_salto_temporal | 38       |
+| salto_vecinal_sin_confirmacion_temporal    | 9        |
+| salto_temporal_puntual_relevante           | 5        |
+| lectura_puntual_indeterminada              | 5        |
+| bajo_soporte_y_pocos_pixeles               | 2        |
+
+Acción recomendada:
+
+| Acción                              | Parcelas |
+|-------------------------------------|----------|
+| bajar_confianza_no_suavizar_score   | 47       |
+| revisar_visual_antes_de_suavizar    | 5        |
+| mantener_alerta                     | 5        |
+| bajar_confianza_y_revisar_geometria | 2        |
+
+Decisión:
+
+```text
+No suavizar automáticamente el score todavía.
+```
+
+Motivo:
+
+- 47 casos parecen problemas de confirmación/confianza, no de valor a corregir;
+- 5 casos tienen salto temporal puntual relevante y requieren revisión visual;
+- 2 casos apuntan a pocos píxeles o posible geometría problemática;
+- el score observado debe conservarse y la acción operativa debe apoyarse en
+  `confianza_lectura`, `motivo_ruido` y `accion_recomendada`.
+
+## Dependencias
+
+Dependencias directas actuales:
+
+```text
+requirements.txt
+```
+
+Decisiones:
+
+- `geemap` y `rasterio` fueron removidos porque no se usan en el flujo actual;
+- `scipy` se agregó porque se usa para `spearmanr`;
+- `psycopg[binary]` queda declarado para PostGIS;
+- el fallback local puede correr sin PostGIS.
+
+## Decisiones Descartadas O Resumidas
+
+Se eliminaron de este documento los detalles extensos de:
+
+- múltiples versiones intermedias del clasificador;
+- tuning de thresholds descartados;
+- particiones de entrenamiento/evaluación del flujo viejo;
+- modelos binarios jerárquicos;
+- datasets fenológicos/híbridos reemplazados;
+- clasificador multiclass como pipeline principal;
+- predictor binario de estrés hídrico.
+
+Motivo:
+
+```text
+No forman parte del flujo operativo vigente.
+```
+
+La historia técnica queda preservada parcialmente en:
+
+```text
+legacy/
+docs/
+```

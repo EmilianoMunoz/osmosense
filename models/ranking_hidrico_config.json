@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "source_validation": "data/validacion_ranking_hidrico_multifecha_2024.csv",
+  "objective": {
+    "description": "0.50*top10_10d + 0.25*spearman_10d + 0.15*top10_5d + 0.10*spearman_5d",
+    "value": 0.8658551577293119
+  },
+  "weights": {
+    "riesgo_pred_10d": 0.25,
+    "riesgo_pred_5d": 0.15,
+    "delta_10d_pos": 0.3,
+    "delta_5d_pos": 0.0,
+    "riesgo_actual": 0.3
+  },
+  "thresholds": {
+    "critica": 55.0,
+    "alta": 47.5,
+    "media": 35.0
+  },
+  "validation_metrics": {
+    "fechas": 12,
+    "n_promedio": 1054.5833333333333,
+    "spearman_5d": 0.9641350744259598,
+    "spearman_10d": 0.9390885601112368,
+    "top10_5d": 0.8522579276349956,
+    "top10_10d": 0.8136616422273146
+  },
+  "threshold_metrics": {
+    "f1_critica": 0.7942857142857143,
+    "f1_alta": 0.8658882928368571,
+    "f1_media": 0.9055069795980978,
+    "objective": 0.8324496776479147
+  }
+}

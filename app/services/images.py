@@ -1,19 +1,10 @@
 import ee
 
+from app.core.region import region_san_rafael_ee
+
 
 def obtener_geometria_san_rafael() -> ee.Geometry:
-    coleccion = (
-        ee.FeatureCollection("FAO/GAUL/2015/level2")
-        .filter(ee.Filter.And(
-            ee.Filter.eq("ADM1_NAME", "Mendoza"),
-            ee.Filter.eq("ADM2_NAME", "San Rafael")
-        ))
-    )
-
-    if coleccion.size().getInfo() == 0:
-        raise Exception("No se encontró San Rafael en la capa GAUL.")
-
-    return coleccion.first().geometry()
+    return region_san_rafael_ee()
 
 
 def enmascarar_nubes_sentinel(image: ee.Image) -> ee.Image:
@@ -22,19 +13,25 @@ def enmascarar_nubes_sentinel(image: ee.Image) -> ee.Image:
     de Sentinel-2 SR Harmonized.
 
     Clases SCL removidas:
+        0  = no data
+        1  = saturated / defective
         3  = cloud shadow
         8  = cloud medium probability
         9  = cloud high probability
         10 = cirrus
+        11 = snow / ice
     """
 
     scl = image.select("SCL")
 
     mascara = (
-        scl.neq(3)
+        scl.neq(0)
+        .And(scl.neq(1))
+        .And(scl.neq(3))
         .And(scl.neq(8))
         .And(scl.neq(9))
         .And(scl.neq(10))
+        .And(scl.neq(11))
     )
 
     return image.updateMask(mascara)
