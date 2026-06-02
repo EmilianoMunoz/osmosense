@@ -7,11 +7,36 @@ import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point
 
-import app.services.rankings as rankings
-from app import main
+import backend.app.services.auth as auth
+import backend.app.services.rankings as rankings
+from backend.app import main
 
 
 class RankingsServiceTest(unittest.TestCase):
+    def test_password_hash_verification(self):
+        password_hash = auth.hash_password("admin123", salt=b"fixed-test-salt1")
+
+        self.assertTrue(auth.verify_password("admin123", password_hash))
+        self.assertFalse(auth.verify_password("otro", password_hash))
+        self.assertFalse(auth.verify_password("admin123", "hash-invalido"))
+
+    def test_access_token_roundtrip(self):
+        user = {
+            "usuario_id": 1,
+            "email": "admin",
+            "nombre": "Administrador",
+            "rol": "admin",
+            "cliente_id": None,
+            "view_mode": "Admin",
+        }
+        with patch.object(auth, "auth_secret", return_value="test-secret"):
+            token = auth.create_access_token(user)
+            payload = auth.verify_access_token(token)
+
+        self.assertEqual(payload["usuario_id"], 1)
+        self.assertEqual(payload["rol"], "admin")
+        self.assertEqual(payload["view_mode"], "Admin")
+
     def test_latest_ranking_from_local_csv_respects_limit(self):
         with patch.object(rankings, "database_url", return_value=None):
             result = rankings.latest_ranking(limit=2)
@@ -134,6 +159,20 @@ class RankingsServiceTest(unittest.TestCase):
 class RankingsApiHandlersTest(unittest.TestCase):
     def test_health_handler(self):
         self.assertEqual(main.health(), {"status": "ok"})
+
+    def test_auth_login_handler_delegates_to_service(self):
+        payload = main.LoginRequest(email="admin", password="admin123")
+        expected = {
+            "source": "postgis",
+            "token_type": "bearer",
+            "access_token": "token",
+            "user": {"email": "admin", "view_mode": "Admin"},
+        }
+        with patch.object(main, "authenticate_user", return_value=expected) as mocked:
+            result = main.post_auth_login(payload)
+
+        mocked.assert_called_once_with("admin", "admin123")
+        self.assertEqual(result, expected)
 
     def test_latest_ranking_handler(self):
         with patch.object(rankings, "database_url", return_value=None):

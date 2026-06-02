@@ -20,14 +20,26 @@ data/logs/
 data/state/
 data/rankings/
 data/auditorias/
+backend/data/**/*.csv
+backend/data/**/*.geojson
+backend/data/**/*.gpkg
+backend/data/**/*.parquet
+backend/data/logs/
+backend/data/state/
+backend/data/rankings/
+backend/data/auditorias/
 
 # GeoJSON grandes o derivados de IDEMendoza
 data/parcelas/*.geojson
+backend/data/parcelas/*.geojson
 
 # Modelos binarios grandes. Versionar por Git LFS o release artifact si hace falta.
 models/hidrico_regresion/
 models/**/*.pkl
 models/*.pkl
+backend/models/hidrico_regresion/
+backend/models/**/*.pkl
+backend/models/*.pkl
 
 # Salidas locales de notebooks/herramientas
 .ipynb_checkpoints/

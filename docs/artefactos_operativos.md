@@ -21,7 +21,7 @@ quedan fuera de Git por `.gitignore`.
 ### Fuente original
 
 ```text
-data/parcelas/parcelas_ide.geojson
+backend/data/parcelas/parcelas_ide.geojson
 ```
 
 Dataset oficial original con geometrías y etiquetas de cultivo. Es la base de
@@ -31,9 +31,9 @@ PostGIS.
 ### Geometrías operativas
 
 ```text
-data/limites/san_rafael.geojson
-data/parcelas/san_rafael_vid_olivo_wgs84.geojson
-data/parcelas/muestra_temporal_full_vid_olivo.geojson
+backend/data/limites/san_rafael.geojson
+backend/data/parcelas/san_rafael_vid_olivo_wgs84.geojson
+backend/data/parcelas/muestra_temporal_full_vid_olivo.geojson
 ```
 
 `san_rafael.geojson` es opcional pero recomendado. Si existe, reemplaza el
@@ -48,7 +48,7 @@ temporal Sentinel-2 y expansión por lotes.
 ### Dataset temporal principal
 
 ```text
-data/dataset_temporal_hidrico.csv
+backend/data/dataset_temporal_hidrico.csv
 ```
 
 Es el dataset operativo actual. Contiene observaciones Sentinel-2 por parcela y
@@ -59,20 +59,20 @@ Este archivo no se versiona por tamaño. Si se borra o se quiere ampliar, se
 regenera con:
 
 ```bash
-venv/bin/python scripts/generar_dataset_temporal_hidrico.py --reuse-sample --resume-from-max-date --output data/dataset_temporal_hidrico.csv --start-date 2023-01-01 --end-date 2024-12-31 --step-days 5 --window-days 5 --chunk-size 500
+venv/bin/python backend/scripts/pipeline/generar_dataset_temporal_hidrico.py --reuse-sample --resume-from-max-date --output backend/data/dataset_temporal_hidrico.csv --start-date 2023-01-01 --end-date 2024-12-31 --step-days 5 --window-days 5 --chunk-size 500
 ```
 
 Para ampliar cobertura latest de parcelas faltantes:
 
 ```bash
-venv/bin/python scripts/generar_dataset_temporal_hidrico.py --all-target-parcels --missing-date 2024-12-31 --max-parcels 1000 --output data/dataset_temporal_hidrico.csv --output-sample data/parcelas/muestra_temporal_full_vid_olivo.geojson --start-date 2024-12-31 --end-date 2024-12-31 --step-days 5 --window-days 5 --chunk-size 250 --cloud-threshold 35 --resume
+venv/bin/python backend/scripts/pipeline/generar_dataset_temporal_hidrico.py --all-target-parcels --missing-date 2024-12-31 --max-parcels 1000 --output backend/data/dataset_temporal_hidrico.csv --output-sample backend/data/parcelas/muestra_temporal_full_vid_olivo.geojson --start-date 2024-12-31 --end-date 2024-12-31 --step-days 5 --window-days 5 --chunk-size 250 --cloud-threshold 35 --resume
 ```
 
 ### Ranking operativo
 
 ```text
-data/rankings/ranking_hidrico_latest.csv
-data/rankings/ranking_hidrico_YYYY-MM-DD.csv
+backend/data/rankings/ranking_hidrico_latest.csv
+backend/data/rankings/ranking_hidrico_YYYY-MM-DD.csv
 ```
 
 Son salidas del pipeline. La API y el dashboard los usan como fallback local
@@ -81,16 +81,16 @@ cuando no hay PostGIS disponible.
 Se regeneran con:
 
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode local
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode local
 ```
 
 ### Auditoría y validación
 
 ```text
-data/auditoria_cobertura_parcelas.csv
-data/auditoria_cobertura_parcelas.geojson
-data/validacion_ranking_hidrico_multifecha_2024.csv
-data/validacion_ranking_hidrico_multifecha_2024_resumen.csv
+backend/data/auditoria_cobertura_parcelas.csv
+backend/data/auditoria_cobertura_parcelas.geojson
+backend/data/validacion_ranking_hidrico_multifecha_2024.csv
+backend/data/validacion_ranking_hidrico_multifecha_2024_resumen.csv
 ```
 
 No son necesarios para servir el producto, pero sirven para medir cobertura,
@@ -101,16 +101,16 @@ calibrar ranking y justificar resultados. Son regenerables y no se versionan.
 Los modelos vigentes son regresores separados por cultivo y horizonte:
 
 ```text
-models/hidrico_regresion/regresor_vid_5d_riesgo_hidrico_future_temporal.pkl
-models/hidrico_regresion/regresor_vid_10d_riesgo_hidrico_future_temporal.pkl
-models/hidrico_regresion/regresor_olivo_5d_riesgo_hidrico_future_temporal.pkl
-models/hidrico_regresion/regresor_olivo_10d_riesgo_hidrico_future_temporal.pkl
+backend/models/hidrico_regresion/regresor_vid_5d_riesgo_hidrico_future_temporal.pkl
+backend/models/hidrico_regresion/regresor_vid_10d_riesgo_hidrico_future_temporal.pkl
+backend/models/hidrico_regresion/regresor_olivo_5d_riesgo_hidrico_future_temporal.pkl
+backend/models/hidrico_regresion/regresor_olivo_10d_riesgo_hidrico_future_temporal.pkl
 ```
 
 La configuración versionable de ranking es:
 
 ```text
-models/ranking_hidrico_config.json
+backend/models/ranking_hidrico_config.json
 ```
 
 Los `.pkl` no se versionan por `.gitignore`. Si se necesita distribuirlos, usar
@@ -129,19 +129,19 @@ Se eliminaron datasets y modelos de etapas descartadas:
 El target intermedio de regresión se recrea con:
 
 ```bash
-venv/bin/python scripts/generar_targets_hidricos_regresion.py
+venv/bin/python backend/scripts/pipeline/generar_targets_hidricos_regresion.py
 ```
 
 Luego se reentrenan los cuatro modelos vigentes con:
 
 ```bash
-venv/bin/python scripts/experiments/entrenar_predictores_hidricos_regresion.py --split temporal
+venv/bin/python backend/scripts/experiments/entrenar_predictores_hidricos_regresion.py --split temporal
 ```
 
 ## Verificación mínima después de limpiar
 
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode local --dry-run
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode local --dry-run
 venv/bin/python -c "from app.services.rankings import latest_ranking, latest_geojson; print(len(latest_ranking(limit=1)), len(latest_geojson()['features']))"
 ```
 

@@ -5,7 +5,7 @@ La API expone el ranking hídrico para que lo consuma el dashboard o mapa.
 ## Ejecutar local
 
 ```bash
-venv/bin/uvicorn app.main:app --reload
+venv/bin/uvicorn backend.app.main:app --reload
 ```
 
 URL local:
@@ -22,8 +22,8 @@ La API usa fuente dual:
 2. Si no existe `DATABASE_URL`, usa archivos locales:
 
 ```text
-data/rankings/ranking_hidrico_latest.csv
-data/parcelas/san_rafael_vid_olivo_wgs84.geojson
+backend/data/rankings/ranking_hidrico_latest.csv
+backend/data/parcelas/san_rafael_vid_olivo_wgs84.geojson
 ```
 
 Esto permite desarrollar localmente sin base de datos y pasar a PostGIS en
@@ -88,6 +88,60 @@ Respuesta:
 {"status": "ok"}
 ```
 
+### Login
+
+```http
+POST /auth/login
+```
+
+Body:
+
+```json
+{"email": "admin", "password": "admin123"}
+```
+
+Valida contra la tabla `usuarios` de PostGIS y devuelve el rol operativo para
+abrir la vista correspondiente del dashboard. También devuelve un token firmado
+que debe enviarse en las rutas protegidas.
+
+Respuesta:
+
+```json
+{
+  "source": "postgis",
+  "token_type": "bearer",
+  "access_token": "...",
+  "user": {
+    "usuario_id": 1,
+    "email": "admin",
+    "nombre": "Administrador",
+    "rol": "admin",
+    "cliente_id": null,
+    "view_mode": "Admin"
+  }
+}
+```
+
+Uso del token:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+El token expira por defecto a las 8 horas. En desarrollo puede configurarse con:
+
+```text
+AUTH_SECRET=...
+AUTH_TOKEN_TTL_SECONDS=28800
+```
+
+Estados:
+
+```text
+401 credenciales inválidas
+503 DATABASE_URL no configurado o PostGIS no disponible
+```
+
 ### Último ranking
 
 ```http
@@ -96,6 +150,8 @@ GET /rankings/latest?limit=100
 ```
 
 Devuelve filas del último ranking, ordenadas por `ranking_global`.
+
+Requiere rol `admin`.
 
 ### Último ranking como GeoJSON
 
@@ -106,6 +162,8 @@ GET /rankings/latest/geojson
 Devuelve un `FeatureCollection` con geometría de todas las parcelas oficiales
 vid/olivo y propiedades del ranking cuando existen. Este endpoint es el
 principal para el mapa interactivo.
+
+Requiere rol `admin`.
 
 Las parcelas con ranking latest tienen:
 
@@ -132,7 +190,7 @@ GET /rankings/2024-12-31?limit=100
 ```
 
 Con fallback CSV solo devuelve datos si la fecha coincide con el archivo
-`data/rankings/ranking_hidrico_<fecha>.csv`. Con PostGIS puede consultar
+`backend/data/rankings/ranking_hidrico_<fecha>.csv`. Con PostGIS puede consultar
 cualquier fecha cargada en `ranking_hidrico`.
 
 ### Clientes
@@ -146,8 +204,8 @@ Devuelve clientes activos con la cantidad de parcelas asignadas.
 En fallback local lee:
 
 ```text
-data/clientes/clientes.csv
-data/clientes/cliente_parcela.csv
+backend/data/clientes/clientes.csv
+backend/data/clientes/cliente_parcela.csv
 ```
 
 Formato mínimo:
@@ -170,7 +228,7 @@ GET /clientes/1/rankings/latest/geojson
 
 Devuelve solo las parcelas asociadas al cliente. El filtrado se hace en backend,
 no en el dashboard. En PostGIS usa `cliente_parcela`; en fallback local usa los
-CSV de `data/clientes`.
+CSV de `backend/data/clientes`.
 
 Este endpoint conserva parcelas asociadas aunque no tengan ranking latest,
 marcándolas como `sin_ranking_latest`.
@@ -485,7 +543,7 @@ regional del dashboard.
 Fallback local:
 
 ```text
-data/zonificacion/um_con_cultivos.geojson
-data/zonificacion/ranking_um_latest.csv
-data/zonificacion/parcelas_um.csv
+backend/data/zonificacion/um_con_cultivos.geojson
+backend/data/zonificacion/ranking_um_latest.csv
+backend/data/zonificacion/parcelas_um.csv
 ```

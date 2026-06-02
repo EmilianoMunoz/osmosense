@@ -8,10 +8,10 @@ cuando el sistema pase a backend/API/mapa.
 El schema está en:
 
 ```text
-sql/schema_postgis.sql
+backend/sql/schema_postgis.sql
 ```
 
-Las tablas no se generan con models/ORM. Se crean con SQL explícito e
+Las tablas no se generan con backend/models/ORM. Se crean con SQL explícito e
 idempotente:
 
 ```sql
@@ -24,13 +24,13 @@ ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...
 El script que aplica ese schema es:
 
 ```bash
-venv/bin/python scripts/aplicar_schema_postgis.py
+venv/bin/python backend/scripts/postgis/aplicar_schema_postgis.py
 ```
 
 El setup completo ejecuta ese schema y luego carga datos operativos:
 
 ```bash
-venv/bin/python scripts/setup_postgis_local.py
+venv/bin/python backend/scripts/postgis/setup_postgis_local.py
 ```
 
 Motivo de esta decisión: el proyecto todavía no necesita una capa ORM. El SQL
@@ -47,7 +47,7 @@ Define:
 | `ranking_hidrico_latest`     | Último ranking disponible.                                |
 | `ranking_hidrico_latest_geo` | Último ranking unido con geometría para mapa.             |
 | `clientes`                   | Clientes particulares o regionales.                       |
-| `usuarios`                   | Estructura preparada para autenticación futura.           |
+| `usuarios`                   | Login operativo y vínculo usuario-rol-cliente.            |
 | `cliente_parcela`            | Relación cliente-parcela para vistas particulares.        |
 | `zonas_um`                   | Geometría de unidades de manejo regionales.               |
 | `parcela_um`                 | Relación espacial parcela-UM.                             |
@@ -80,25 +80,25 @@ puede entrar a la próxima extracción Sentinel cuando el pipeline se ejecuta co
 El extractor temporal ya soporta esa fuente con:
 
 ```bash
-venv/bin/python scripts/generar_dataset_temporal_hidrico.py --all-target-parcels --parcel-source postgis --start-date 2026-05-21 --end-date 2026-05-26
+venv/bin/python backend/scripts/pipeline/generar_dataset_temporal_hidrico.py --all-target-parcels --parcel-source postgis --start-date 2026-05-21 --end-date 2026-05-26
 ```
 
 Desde el orquestador operativo:
 
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --load-postgis
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --load-postgis
 ```
 
 Cargar solo vid/olivo:
 
 ```bash
-venv/bin/python scripts/setup_postgis_local.py
+venv/bin/python backend/scripts/postgis/setup_postgis_local.py
 ```
 
 Cargar todas las parcelas oficiales para habilitar mapa de disponibles:
 
 ```bash
-venv/bin/python scripts/setup_postgis_local.py --all-parcelas
+venv/bin/python backend/scripts/postgis/setup_postgis_local.py --all-parcelas
 ```
 
 ## Configuración
@@ -151,68 +151,122 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 Aplicar schema y cargar todo el estado operativo local:
 
 ```bash
-venv/bin/python scripts/setup_postgis_local.py
+venv/bin/python backend/scripts/postgis/setup_postgis_local.py
 ```
 
 Esto ejecuta:
 
 ```text
-scripts/aplicar_schema_postgis.py
-scripts/cargar_parcelas_postgis.py
-scripts/cargar_ranking_postgis.py
-scripts/cargar_clientes_parcelas_postgis.py
-scripts/cargar_zonificacion_um_postgis.py
+backend/scripts/postgis/aplicar_schema_postgis.py
+backend/scripts/postgis/cargar_parcelas_postgis.py
+backend/scripts/postgis/cargar_ranking_postgis.py
+backend/scripts/postgis/cargar_clientes_parcelas_postgis.py
+backend/scripts/postgis/cargar_zonificacion_um_postgis.py
+backend/scripts/postgis/cargar_usuarios_demo_postgis.py
 ```
 
 Validar conteos:
 
 ```bash
-venv/bin/python scripts/validar_postgis_local.py
+venv/bin/python backend/scripts/postgis/validar_postgis_local.py
 ```
 
 Validar flujo operativo con smoke test:
 
 ```bash
-venv/bin/python scripts/smoke_test_operativo.py --skip-api --check-postgis
+venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --skip-api --check-postgis
 ```
 
 Con la API levantada y `DATABASE_URL` configurado:
 
 ```bash
-venv/bin/python scripts/smoke_test_operativo.py --require-source postgis
+venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis
 ```
 
 Comandos individuales:
 
 ```bash
-venv/bin/python scripts/aplicar_schema_postgis.py
-venv/bin/python scripts/cargar_parcelas_postgis.py
-venv/bin/python scripts/cargar_ranking_postgis.py
-venv/bin/python scripts/cargar_clientes_parcelas_postgis.py
-venv/bin/python scripts/cargar_zonificacion_um_postgis.py
+venv/bin/python backend/scripts/postgis/aplicar_schema_postgis.py
+venv/bin/python backend/scripts/postgis/cargar_parcelas_postgis.py
+venv/bin/python backend/scripts/postgis/cargar_ranking_postgis.py
+venv/bin/python backend/scripts/postgis/cargar_clientes_parcelas_postgis.py
+venv/bin/python backend/scripts/postgis/cargar_zonificacion_um_postgis.py
+venv/bin/python backend/scripts/postgis/cargar_usuarios_demo_postgis.py
+```
+
+## Autenticación
+
+La tabla `usuarios` guarda el login del dashboard. Los passwords se almacenan
+como hash PBKDF2-SHA256, no en texto plano.
+
+Roles soportados:
+
+| Rol                   | Vista dashboard | Requiere cliente |
+|-----------------------|-----------------|------------------|
+| `admin`               | Admin           | No               |
+| `cliente_particular`  | Cliente         | Sí               |
+| `cliente_regional`    | Regional        | No               |
+
+Cargar o actualizar usuarios demo:
+
+```bash
+venv/bin/python backend/scripts/postgis/cargar_usuarios_demo_postgis.py
+```
+
+Usuarios cargados:
+
+| Login      | Contraseña    | Rol                  |
+|------------|---------------|----------------------|
+| `admin`    | `admin123`    | `admin`              |
+| `finca`    | `cliente123`  | `cliente_particular` |
+| `olivar`   | `cliente123`  | `cliente_particular` |
+| `regional` | `regional123` | `cliente_regional`   |
+
+El endpoint de login es:
+
+```http
+POST /auth/login
+```
+
+El login devuelve un token `Bearer` firmado. Las rutas operativas quedan
+protegidas por rol:
+
+| Rutas                         | Roles permitidos                         |
+|-------------------------------|------------------------------------------|
+| `/admin/*`                    | `admin`                                  |
+| `/rankings/latest*`           | `admin`                                  |
+| `/rankings/{fecha}`           | `admin`                                  |
+| `/clientes`                   | `admin`                                  |
+| `/clientes/{id}/rankings/*`   | `admin` o cliente particular propietario |
+| `/regional/*`                 | `admin` o `cliente_regional`             |
+
+El dashboard Streamlit guarda el token en sesión y lo envía como:
+
+```http
+Authorization: Bearer <access_token>
 ```
 
 Cargar ranking automáticamente desde el orquestador:
 
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --skip-if-no-new-date --load-postgis
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --skip-if-no-new-date --load-postgis
 ```
 
 Pruebas sin conectarse a la DB:
 
 ```bash
-venv/bin/python scripts/aplicar_schema_postgis.py --dry-run
-venv/bin/python scripts/cargar_parcelas_postgis.py --dry-run
-venv/bin/python scripts/cargar_ranking_postgis.py --dry-run
-venv/bin/python scripts/cargar_clientes_parcelas_postgis.py --dry-run
-venv/bin/python scripts/cargar_zonificacion_um_postgis.py --dry-run
-venv/bin/python scripts/setup_postgis_local.py --dry-run
-venv/bin/python scripts/run_pipeline_hidrico.py --mode local --load-postgis --dry-run
+venv/bin/python backend/scripts/postgis/aplicar_schema_postgis.py --dry-run
+venv/bin/python backend/scripts/postgis/cargar_parcelas_postgis.py --dry-run
+venv/bin/python backend/scripts/postgis/cargar_ranking_postgis.py --dry-run
+venv/bin/python backend/scripts/postgis/cargar_clientes_parcelas_postgis.py --dry-run
+venv/bin/python backend/scripts/postgis/cargar_zonificacion_um_postgis.py --dry-run
+venv/bin/python backend/scripts/postgis/setup_postgis_local.py --dry-run
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode local --load-postgis --dry-run
 ```
 
 ## Supuesto de identificador
 
-El GeoJSON `data/parcelas/san_rafael_vid_olivo_wgs84.geojson` usa `fid`.
+El GeoJSON `backend/data/parcelas/san_rafael_vid_olivo_wgs84.geojson` usa `fid`.
 Los rankings usan `parcela_id`.
 
 Para esta etapa se asume:
@@ -257,15 +311,15 @@ ranking_um_latest_geo
 Carga:
 
 ```bash
-venv/bin/python scripts/cargar_zonificacion_um_postgis.py
+venv/bin/python backend/scripts/postgis/cargar_zonificacion_um_postgis.py
 ```
 
 Entradas locales:
 
 ```text
-data/zonificacion/um_con_cultivos.geojson
-data/zonificacion/parcelas_um.csv
-data/zonificacion/ranking_um_latest.csv
+backend/data/zonificacion/um_con_cultivos.geojson
+backend/data/zonificacion/parcelas_um.csv
+backend/data/zonificacion/ranking_um_latest.csv
 ```
 
 El pipeline puede regenerar estos archivos después de cada ranking con

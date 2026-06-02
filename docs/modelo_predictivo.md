@@ -45,7 +45,7 @@ Los demás targets sirven para interpretación agronómica.
 El dataset base es:
 
 ```text
-data/dataset_temporal_hidrico.csv
+backend/data/dataset_temporal_hidrico.csv
 ```
 
 Contiene observaciones Sentinel-2 cada 5 días, filtradas por píxeles
@@ -54,13 +54,13 @@ válidos, para parcelas de vid y olivo.
 El dataset predictivo de regresión es:
 
 ```text
-data/dataset_predictivo_hidrico_regresion.csv
+backend/data/dataset_predictivo_hidrico_regresion.csv
 ```
 
 Se genera con:
 
 ```bash
-venv/bin/python scripts/generar_targets_hidricos_regresion.py
+venv/bin/python backend/scripts/pipeline/generar_targets_hidricos_regresion.py
 ```
 
 Código principal:
@@ -577,14 +577,14 @@ verano. Con `min-n-summary=50`, verano queda en un rango consistente:
 Se agregó un reporte reproducible:
 
 ```bash
-venv/bin/python scripts/analizar_importancia_predictores_hidricos.py --top-n 10
+venv/bin/python backend/scripts/modeling/analizar_importancia_predictores_hidricos.py --top-n 10
 ```
 
 Archivos generados:
 
 ```text
-data/importancia_predictores_hidricos.csv
-data/importancia_predictores_hidricos_grupos.csv
+backend/data/importancia_predictores_hidricos.csv
+backend/data/importancia_predictores_hidricos_grupos.csv
 ```
 
 Los modelos operativos fueron reentrenados excluyendo features `scl_*`.
@@ -631,13 +631,13 @@ scripts/optimizar_ranking_hidrico.py
 Comando:
 
 ```bash
-venv/bin/python scripts/optimizar_ranking_hidrico.py --step 0.05 --min-n 50
+venv/bin/python backend/scripts/modeling/optimizar_ranking_hidrico.py --step 0.05 --min-n 50
 ```
 
 Este script usa:
 
 ```text
-data/validacion_ranking_hidrico_multifecha_2024.csv
+backend/data/validacion_ranking_hidrico_multifecha_2024.csv
 ```
 
 y busca pesos que maximicen:
@@ -652,7 +652,7 @@ y busca pesos que maximicen:
 La prioridad se calcula ahora con la configuración:
 
 ```text
-models/ranking_hidrico_config.json
+backend/models/ranking_hidrico_config.json
 ```
 
 Pesos calibrados:
@@ -874,13 +874,13 @@ Mitigación propuesta para versiones posteriores:
 Dataset predictivo:
 
 ```text
-data/dataset_predictivo_hidrico_regresion.csv
+backend/data/dataset_predictivo_hidrico_regresion.csv
 ```
 
 Modelos:
 
 ```text
-models/hidrico_regresion/
+backend/models/hidrico_regresion/
 ```
 
 Modelos principales para ranking:
@@ -895,8 +895,8 @@ regresor_olivo_10d_riesgo_hidrico_future_temporal.pkl
 Métricas:
 
 ```text
-models/hidrico_regresion/metricas_regresion_temporal.csv
-models/hidrico_regresion/metricas_regresion_group.csv
+backend/models/hidrico_regresion/metricas_regresion_temporal.csv
+backend/models/hidrico_regresion/metricas_regresion_group.csv
 ```
 
 ---
@@ -906,17 +906,17 @@ models/hidrico_regresion/metricas_regresion_group.csv
 Generar dataset predictivo:
 
 ```bash
-venv/bin/python scripts/generar_targets_hidricos_regresion.py
+venv/bin/python backend/scripts/pipeline/generar_targets_hidricos_regresion.py
 ```
 
 Entrenar modelos principales:
 
 ```bash
-venv/bin/python scripts/experiments/entrenar_predictores_hidricos_regresion.py --split temporal
+venv/bin/python backend/scripts/experiments/entrenar_predictores_hidricos_regresion.py --split temporal
 ```
 
 Evaluación secundaria por parcela:
 
 ```bash
-venv/bin/python scripts/experiments/entrenar_predictores_hidricos_regresion.py --split group
+venv/bin/python backend/scripts/experiments/entrenar_predictores_hidricos_regresion.py --split group
 ```

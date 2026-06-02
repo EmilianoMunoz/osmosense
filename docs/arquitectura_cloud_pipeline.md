@@ -50,29 +50,29 @@ Una primera versión puede correr en una única VM Ubuntu de UM-Cloud:
 - Python 3.10+ y `venv`;
 - archivo `.env` con `GEE_PROJECT_ID`;
 - autenticación Earth Engine configurada para el usuario de ejecución;
-- modelos en `models/hidrico_regresion/`;
-- datasets base en `data/`;
+- modelos en `backend/models/hidrico_regresion/`;
+- datasets base en `backend/data/`;
 - ejecución programada con `systemd timer` o `cron`.
 
 El comando operativo previsto es:
 
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --skip-if-no-new-date --load-postgis
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --skip-if-no-new-date --load-postgis
 ```
 
 Para pruebas sin consultar GEE:
 
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud
 ```
 
 ## Entradas esperadas
 
 | Entrada              | Ubicación prevista| Nota                                               |
 |----------------------|-------------------|----------------------------------------------------|
-| Parcelas base        | `data/parcelas/`  | Geometrías/etiquetas oficiales o muestra operativa.|
-| Dataset temporal     | `data/dataset_temporal_hidrico.csv` | Regenerable; no debe versionarse en Git. |
-| Modelos de regresión | `models/hidrico_regresion/*.pkl` | Artefactos pesados; idealmente subir por release/artifact, no Git normal. |
+| Parcelas base        | `backend/data/parcelas/`  | Geometrías/etiquetas oficiales o muestra operativa.|
+| Dataset temporal     | `backend/data/dataset_temporal_hidrico.csv` | Regenerable; no debe versionarse en Git. |
+| Modelos de regresión | `backend/models/hidrico_regresion/*.pkl` | Artefactos pesados; idealmente subir por release/artifact, no Git normal. |
 | Configuración GEE    | `.env` + credenciales EE | No versionar secretos. |
 
 ## Salidas operativas
@@ -80,10 +80,10 @@ venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud
 El orquestador genera:
 
 ```text
-data/rankings/ranking_hidrico_YYYY-MM-DD.csv
-data/rankings/ranking_hidrico_latest.csv
-data/state/pipeline_hidrico_state.json
-data/logs/pipeline_hidrico_YYYYMMDD_HHMMSS.log
+backend/data/rankings/ranking_hidrico_YYYY-MM-DD.csv
+backend/data/rankings/ranking_hidrico_latest.csv
+backend/data/state/pipeline_hidrico_state.json
+backend/data/logs/pipeline_hidrico_YYYYMMDD_HHMMSS.log
 ```
 
 Estas salidas son artefactos de ejecución y quedan ignoradas por Git. En cloud
@@ -92,7 +92,7 @@ deben conservarse en disco, respaldarse o migrarse luego a base de datos.
 ## Publicación del ranking
 
 Fase 1:
-el mapa/backend lee `data/rankings/ranking_hidrico_latest.csv`.
+el mapa/backend lee `backend/data/rankings/ranking_hidrico_latest.csv`.
 
 Fase 2:
 persistir rankings en PostgreSQL/PostGIS o una tabla relacional simple,
@@ -120,7 +120,7 @@ Configuración recomendada inicial:
 
 - ejecución diaria de madrugada;
 - logs por ejecución;
-- estado persistido en `data/state/pipeline_hidrico_state.json`;
+- estado persistido en `backend/data/state/pipeline_hidrico_state.json`;
 - alerta manual si el comando falla.
 
 El flag `--skip-if-no-new-date` evita reescribir rankings cuando GEE no agregó

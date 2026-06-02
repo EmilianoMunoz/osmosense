@@ -31,8 +31,10 @@ Primera carga completa:
 
 ## Acceso
 
-El dashboard abre primero una pantalla de login. En esta etapa el login es
-local/de desarrollo, no autenticación productiva.
+El dashboard abre primero una pantalla de login. Si la API está disponible, las
+credenciales se validan contra la tabla `usuarios` de PostGIS vía
+`POST /auth/login`. Si la API no está disponible, se conserva fallback demo para
+desarrollo.
 
 Usuarios demo:
 
@@ -122,8 +124,8 @@ POST /admin/parcelas/{parcela_id}/activar-disponible
 Si la API no responde, usa fallback local:
 
 ```text
-data/rankings/ranking_hidrico_latest.csv
-data/parcelas/san_rafael_vid_olivo_wgs84.geojson
+backend/data/rankings/ranking_hidrico_latest.csv
+backend/data/parcelas/san_rafael_vid_olivo_wgs84.geojson
 ```
 
 ## Vistas incluidas
@@ -200,8 +202,8 @@ operativa.
 Para habilitar clientes en fallback local:
 
 ```text
-data/clientes/clientes.csv
-data/clientes/cliente_parcela.csv
+backend/data/clientes/clientes.csv
+backend/data/clientes/cliente_parcela.csv
 ```
 
 Clientes demo actuales:
@@ -230,9 +232,9 @@ Olivar Demo Este: parcelas vecinas de olivo
 Fuente local:
 
 ```text
-data/zonificacion/um_con_cultivos.geojson
-data/zonificacion/ranking_um_latest.csv
-data/zonificacion/parcelas_um.csv
+backend/data/zonificacion/um_con_cultivos.geojson
+backend/data/zonificacion/ranking_um_latest.csv
+backend/data/zonificacion/parcelas_um.csv
 ```
 
 Esta vista omite UM sin cultivos porque la decisión regional se quiere hacer
@@ -246,13 +248,13 @@ sin ranking se mantienen visibles en gris.
 Para acelerar el mapa se usa un GeoJSON liviano de visualización:
 
 ```text
-data/parcelas/san_rafael_vid_olivo_dashboard.geojson
+backend/data/parcelas/san_rafael_vid_olivo_dashboard.geojson
 ```
 
 Se genera desde el parcelario operativo con:
 
 ```bash
-venv/bin/python scripts/generar_geojson_dashboard_parcelas.py
+venv/bin/python backend/scripts/maintenance/generar_geojson_dashboard_parcelas.py
 ```
 
 Este archivo conserva `fid`, `cultivo`, `area_m2` y geometría simplificada. El
@@ -262,14 +264,14 @@ que se envía a Plotly se reduce a geometría + `parcela_id`.
 Para auditar faltantes:
 
 ```bash
-venv/bin/python scripts/auditar_cobertura_parcelas.py
+venv/bin/python backend/scripts/audit/auditar_cobertura_parcelas.py
 ```
 
 Salidas:
 
 ```text
-data/auditoria_cobertura_parcelas.csv
-data/auditoria_cobertura_parcelas.geojson
+backend/data/auditoria_cobertura_parcelas.csv
+backend/data/auditoria_cobertura_parcelas.geojson
 ```
 
 Estados posibles:

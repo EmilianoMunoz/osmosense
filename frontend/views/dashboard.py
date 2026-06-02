@@ -30,7 +30,15 @@ from frontend.views.regional import render_regional_view
 def select_view_mode() -> tuple[str, bool, bool]:
     st.sidebar.header("Acceso")
     current_view = st.session_state.get("view_mode", "Cliente")
-    options = ["Cliente", "Regional", "Admin"]
+    rol = st.session_state.get("auth_rol")
+    if rol == "admin":
+        options = ["Admin", "Regional", "Cliente"]
+    elif rol == "cliente_regional":
+        options = ["Regional"]
+    elif rol == "cliente_particular":
+        options = ["Cliente"]
+    else:
+        options = ["Cliente", "Regional", "Admin"]
     view_mode = st.sidebar.radio(
         "Vista",
         options,
@@ -45,12 +53,18 @@ def select_cliente(admin_mode: bool) -> tuple[int | None, str | None]:
     if admin_mode or st.session_state.get("view_mode") == "Regional":
         return None, None
 
+    auth_cliente_id = st.session_state.get("auth_cliente_id")
+    if st.session_state.get("auth_rol") == "cliente_particular" and auth_cliente_id is not None:
+        cliente_id = int(auth_cliente_id)
+        st.sidebar.caption(f"Cliente asignado: {cliente_id}")
+        return cliente_id, f"Cliente {cliente_id}"
+
     clientes_data = load_clientes()
     clientes_items = clientes_data.get("items", [])
     if not clientes_items:
         st.info(
-            "No hay clientes cargados. Crear data/clientes/clientes.csv y "
-            "data/clientes/cliente_parcela.csv para habilitar la vista cliente."
+            "No hay clientes cargados. Crear backend/data/clientes/clientes.csv y "
+            "backend/data/clientes/cliente_parcela.csv para habilitar la vista cliente."
         )
         st.stop()
 
@@ -62,7 +76,6 @@ def select_cliente(admin_mode: bool) -> tuple[int | None, str | None]:
         for item in clientes_items
     }
     cliente_ids = list(labels)
-    auth_cliente_id = st.session_state.get("auth_cliente_id")
     cliente_index = (
         cliente_ids.index(int(auth_cliente_id))
         if auth_cliente_id is not None and int(auth_cliente_id) in cliente_ids

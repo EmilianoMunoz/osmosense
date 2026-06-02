@@ -15,10 +15,26 @@ def api_base_url() -> str:
     return os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 
 
+def auth_token() -> str | None:
+    token = st.session_state.get("auth_token")
+    return str(token) if token else None
+
+
+def auth_headers(token: str | None = None) -> dict[str, str] | None:
+    token = token if token is not None else auth_token()
+    if not token:
+        return None
+    return {"Authorization": f"Bearer {token}"}
+
+
 @st.cache_data(show_spinner=False)
-def fetch_geojson_from_api(base_url: str) -> dict[str, Any] | None:
+def fetch_geojson_from_api(base_url: str, token: str | None) -> dict[str, Any] | None:
     try:
-        response = requests.get(f"{base_url}/rankings/latest/geojson", timeout=5)
+        response = requests.get(
+            f"{base_url}/rankings/latest/geojson",
+            headers=auth_headers(token),
+            timeout=5,
+        )
         response.raise_for_status()
         return response.json()
     except requests.RequestException:
@@ -26,9 +42,13 @@ def fetch_geojson_from_api(base_url: str) -> dict[str, Any] | None:
 
 
 @st.cache_data(show_spinner=False)
-def fetch_clientes_from_api(base_url: str) -> dict[str, Any] | None:
+def fetch_clientes_from_api(base_url: str, token: str | None) -> dict[str, Any] | None:
     try:
-        response = requests.get(f"{base_url}/clientes", timeout=5)
+        response = requests.get(
+            f"{base_url}/clientes",
+            headers=auth_headers(token),
+            timeout=5,
+        )
         response.raise_for_status()
         return response.json()
     except requests.RequestException:
@@ -36,10 +56,15 @@ def fetch_clientes_from_api(base_url: str) -> dict[str, Any] | None:
 
 
 @st.cache_data(show_spinner=False)
-def fetch_cliente_geojson_from_api(base_url: str, cliente_id: int) -> dict[str, Any] | None:
+def fetch_cliente_geojson_from_api(
+    base_url: str,
+    cliente_id: int,
+    token: str | None,
+) -> dict[str, Any] | None:
     try:
         response = requests.get(
             f"{base_url}/clientes/{cliente_id}/rankings/latest/geojson",
+            headers=auth_headers(token),
             timeout=5,
         )
         response.raise_for_status()
@@ -52,12 +77,14 @@ def fetch_cliente_geojson_from_api(base_url: str, cliente_id: int) -> dict[str, 
 def fetch_admin_parcelas_disponibles_from_api(
     base_url: str,
     limit: int | None = None,
+    token: str | None = None,
 ) -> dict[str, Any] | None:
     try:
         params = {"limit": limit} if limit else None
         response = requests.get(
             f"{base_url}/admin/parcelas/disponibles",
             params=params,
+            headers=auth_headers(token),
             timeout=10,
         )
         response.raise_for_status()
@@ -81,6 +108,7 @@ def activar_parcela_disponible(
     response = requests.post(
         f"{api_base_url()}/admin/parcelas/{int(parcela_id)}/activar-disponible",
         json=payload,
+        headers=auth_headers(),
         timeout=10,
     )
     response.raise_for_status()
@@ -92,9 +120,13 @@ def activar_parcela_disponible(
 
 
 @st.cache_data(show_spinner=False)
-def fetch_regional_um_geojson_from_api(base_url: str) -> dict[str, Any] | None:
+def fetch_regional_um_geojson_from_api(base_url: str, token: str | None) -> dict[str, Any] | None:
     try:
-        response = requests.get(f"{base_url}/regional/um/latest/geojson", timeout=5)
+        response = requests.get(
+            f"{base_url}/regional/um/latest/geojson",
+            headers=auth_headers(token),
+            timeout=5,
+        )
         response.raise_for_status()
         return response.json()
     except requests.RequestException:
@@ -105,10 +137,12 @@ def fetch_regional_um_geojson_from_api(base_url: str) -> dict[str, Any] | None:
 def fetch_regional_um_parcelas_geojson_from_api(
     base_url: str,
     um_id: int,
+    token: str | None,
 ) -> dict[str, Any] | None:
     try:
         response = requests.get(
             f"{base_url}/regional/um/{um_id}/parcelas/latest/geojson",
+            headers=auth_headers(token),
             timeout=5,
         )
         response.raise_for_status()
@@ -119,7 +153,7 @@ def fetch_regional_um_parcelas_geojson_from_api(
 
 @st.cache_data(show_spinner=False)
 def load_geojson_local() -> dict[str, Any]:
-    from app.services.rankings import latest_geojson_from_csv
+    from backend.app.services.rankings import latest_geojson_from_csv
 
     data = latest_geojson_from_csv()
     data["source"] = "local"
@@ -128,14 +162,14 @@ def load_geojson_local() -> dict[str, Any]:
 
 @st.cache_data(show_spinner=False)
 def load_clientes_local() -> dict[str, Any]:
-    from app.services.rankings import clientes
+    from backend.app.services.rankings import clientes
 
     return clientes()
 
 
 @st.cache_data(show_spinner=False)
 def load_cliente_geojson_local(cliente_id: int) -> dict[str, Any]:
-    from app.services.rankings import latest_geojson_cliente_from_csv
+    from backend.app.services.rankings import latest_geojson_cliente_from_csv
 
     data = latest_geojson_cliente_from_csv(cliente_id)
     data["source"] = "local"
@@ -144,7 +178,7 @@ def load_cliente_geojson_local(cliente_id: int) -> dict[str, Any]:
 
 def load_clientes() -> dict[str, Any]:
     base_url = api_base_url()
-    data = fetch_clientes_from_api(base_url)
+    data = fetch_clientes_from_api(base_url, auth_token())
     if data is not None:
         return data
     return load_clientes_local()
@@ -153,12 +187,12 @@ def load_clientes() -> dict[str, Any]:
 def load_geojson(cliente_id: int | None = None) -> dict[str, Any]:
     base_url = api_base_url()
     if cliente_id is not None:
-        data = fetch_cliente_geojson_from_api(base_url, cliente_id)
+        data = fetch_cliente_geojson_from_api(base_url, cliente_id, auth_token())
         if data is not None:
             return data
         return load_cliente_geojson_local(cliente_id)
 
-    data = fetch_geojson_from_api(base_url)
+    data = fetch_geojson_from_api(base_url, auth_token())
     if data is not None:
         return data
     return load_geojson_local()
@@ -187,7 +221,11 @@ def admin_disponibles_to_geojson(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_admin_parcelas_disponibles(limit: int | None = 3000) -> dict[str, Any]:
-    data = fetch_admin_parcelas_disponibles_from_api(api_base_url(), limit=limit)
+    data = fetch_admin_parcelas_disponibles_from_api(
+        api_base_url(),
+        limit=limit,
+        token=auth_token(),
+    )
     if data is None:
         return {"source": "api_unavailable", "count": 0, "items": []}
     return admin_disponibles_to_geojson(data)
@@ -303,7 +341,7 @@ def filtered_geojson(data: dict[str, Any], ids: set[int]) -> dict[str, Any]:
 
 @st.cache_data(show_spinner=False)
 def load_zonificacion_san_rafael(
-    path: str = "data/zonificacion/um_con_cultivos.geojson",
+    path: str = "backend/data/zonificacion/um_con_cultivos.geojson",
 ) -> tuple[dict[str, Any], pd.DataFrame]:
     gdf = gpd.read_file(path).to_crs("EPSG:4326")
     gdf = gdf.reset_index(drop=True).copy()
@@ -367,7 +405,7 @@ def normalize_regional_um_geojson(data: dict[str, Any]) -> tuple[dict[str, Any],
 
 def load_zonificacion_regional() -> tuple[dict[str, Any], pd.DataFrame]:
     base_url = api_base_url()
-    data = fetch_regional_um_geojson_from_api(base_url)
+    data = fetch_regional_um_geojson_from_api(base_url, auth_token())
     if data is not None:
         return normalize_regional_um_geojson(data)
     return load_zonificacion_san_rafael()
@@ -375,7 +413,7 @@ def load_zonificacion_regional() -> tuple[dict[str, Any], pd.DataFrame]:
 
 def load_regional_um_parcelas_geojson(um_id: int) -> dict[str, Any]:
     base_url = api_base_url()
-    data = fetch_regional_um_parcelas_geojson_from_api(base_url, um_id)
+    data = fetch_regional_um_parcelas_geojson_from_api(base_url, um_id, auth_token())
     if data is not None:
         return data
 
@@ -408,7 +446,7 @@ def load_regional_um_parcelas_geojson(um_id: int) -> dict[str, Any]:
 
 
 @st.cache_data(show_spinner=False)
-def load_parcelas_um(path: str = "data/zonificacion/parcelas_um.csv") -> pd.DataFrame:
+def load_parcelas_um(path: str = "backend/data/zonificacion/parcelas_um.csv") -> pd.DataFrame:
     df = pd.read_csv(path)
     numeric_cols = [
         "parcela_id",

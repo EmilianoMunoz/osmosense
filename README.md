@@ -78,75 +78,75 @@ earthengine authenticate
 
 ### Recalcular dataset temporal Sentinel-2
 ```bash
-venv/bin/python scripts/generar_dataset_temporal_hidrico.py --reuse-sample --resume-from-max-date --output data/dataset_temporal_hidrico.csv --start-date 2023-01-01 --end-date 2024-12-31 --step-days 5 --window-days 5 --chunk-size 500
+venv/bin/python backend/scripts/pipeline/generar_dataset_temporal_hidrico.py --reuse-sample --resume-from-max-date --output backend/data/dataset_temporal_hidrico.csv --start-date 2023-01-01 --end-date 2024-12-31 --step-days 5 --window-days 5 --chunk-size 500
 ```
 
 ### Ampliar cobertura de parcelas faltantes
 Extraer fecha latest para el próximo lote de parcelas sin observación:
 ```bash
-venv/bin/python scripts/generar_dataset_temporal_hidrico.py --all-target-parcels --missing-date 2024-12-31 --max-parcels 1000 --output data/dataset_temporal_hidrico.csv --output-sample data/parcelas/muestra_temporal_full_vid_olivo.geojson --start-date 2024-12-31 --end-date 2024-12-31 --step-days 5 --window-days 5 --chunk-size 250 --cloud-threshold 35 --resume
+venv/bin/python backend/scripts/pipeline/generar_dataset_temporal_hidrico.py --all-target-parcels --missing-date 2024-12-31 --max-parcels 1000 --output backend/data/dataset_temporal_hidrico.csv --output-sample backend/data/parcelas/muestra_temporal_full_vid_olivo.geojson --start-date 2024-12-31 --end-date 2024-12-31 --step-days 5 --window-days 5 --chunk-size 250 --cloud-threshold 35 --resume
 ```
 
 Luego regenerar ranking:
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode local
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode local
 ```
 
 ### Generar targets de regresión hídrica
 ```bash
-venv/bin/python scripts/generar_targets_hidricos_regresion.py
+venv/bin/python backend/scripts/pipeline/generar_targets_hidricos_regresion.py
 ```
 
 ### Reentrenar modelos de ranking hídrico
 ```bash
-venv/bin/python scripts/experiments/entrenar_predictores_hidricos_regresion.py --split temporal
+venv/bin/python backend/scripts/experiments/entrenar_predictores_hidricos_regresion.py --split temporal
 ```
 
 ### Analizar importancia de variables del predictor
 ```bash
-venv/bin/python scripts/analizar_importancia_predictores_hidricos.py --top-n 10
+venv/bin/python backend/scripts/modeling/analizar_importancia_predictores_hidricos.py --top-n 10
 ```
 
 ### Optimizar fórmula final de ranking
 ```bash
-venv/bin/python scripts/optimizar_ranking_hidrico.py --step 0.05 --min-n 50
+venv/bin/python backend/scripts/modeling/optimizar_ranking_hidrico.py --step 0.05 --min-n 50
 ```
 
 La configuración calibrada queda en:
 
 ```text
-models/ranking_hidrico_config.json
+backend/models/ranking_hidrico_config.json
 ```
 
 ### Auditar cobertura de parcelas
 ```bash
-venv/bin/python scripts/auditar_cobertura_parcelas.py
+venv/bin/python backend/scripts/audit/auditar_cobertura_parcelas.py
 ```
 
 Salidas:
 
 ```text
-data/auditoria_cobertura_parcelas.csv
-data/auditoria_cobertura_parcelas.geojson
+backend/data/auditoria_cobertura_parcelas.csv
+backend/data/auditoria_cobertura_parcelas.geojson
 ```
 
 ### Auditar parcelas sin ranking
 ```bash
-venv/bin/python scripts/auditar_sin_ranking.py
+venv/bin/python backend/scripts/audit/auditar_sin_ranking.py
 ```
 
 Salidas:
 
 ```text
-data/auditoria_sin_ranking_detalle.csv
-data/auditoria_sin_ranking_resumen.csv
-data/auditoria_sin_ranking_detalle.geojson
+backend/data/auditoria_sin_ranking_detalle.csv
+backend/data/auditoria_sin_ranking_resumen.csv
+backend/data/auditoria_sin_ranking_detalle.geojson
 ```
 
 ### Auditar outliers espaciales por vecinos
 ```bash
-venv/bin/python scripts/auditar_vecinos_ranking.py --score-column prioridad_score
-venv/bin/python scripts/auditar_vecinos_ranking.py --score-column riesgo_actual --output-detalle data/auditoria_vecinos_ranking_riesgo_actual.csv --output-resumen data/auditoria_vecinos_ranking_riesgo_actual_resumen.csv --output-geojson data/auditoria_vecinos_ranking_riesgo_actual.geojson
+venv/bin/python backend/scripts/audit/auditar_vecinos_ranking.py --score-column prioridad_score
+venv/bin/python backend/scripts/audit/auditar_vecinos_ranking.py --score-column riesgo_actual --output-detalle backend/data/auditoria_vecinos_ranking_riesgo_actual.csv --output-resumen backend/data/auditoria_vecinos_ranking_riesgo_actual_resumen.csv --output-geojson backend/data/auditoria_vecinos_ranking_riesgo_actual.geojson
 ```
 
 Por defecto compara cada parcela rankeada contra vecinos del mismo cultivo,
@@ -155,7 +155,7 @@ más de la mediana vecinal.
 
 ### Auditar persistencia temporal de outliers
 ```bash
-venv/bin/python scripts/auditar_outliers_temporales.py
+venv/bin/python backend/scripts/audit/auditar_outliers_temporales.py
 ```
 
 Usa los outliers espaciales de `riesgo_actual` y revisa si el salto es
@@ -164,22 +164,22 @@ persistente, puntual o indeterminado según el historial de la misma parcela.
 ### Ejecutar pipeline operativo local/cloud
 Sin consultar GEE, usando el dataset temporal existente:
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode local
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode local
 ```
 
 Actualizando Sentinel-2/GEE antes de rankear:
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --skip-if-no-new-date
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --skip-if-no-new-date
 ```
 
 Actualizando Sentinel-2/GEE usando parcelas activas desde PostGIS:
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date
 ```
 
 Actualizando solo una ventana reciente para análisis latest/t-5/t-10:
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --recent-days 10 --extract-chunk-size 250 --skip-if-no-new-date
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --recent-days 10 --extract-chunk-size 250 --skip-if-no-new-date
 ```
 
 En ejecución real, este modo primero busca hacia atrás la última ventana
@@ -203,15 +203,15 @@ válida resuelta es 2026-05-31, consulta:
 
 Actualizando Sentinel-2/GEE y cargando el ranking en PostGIS:
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date --load-postgis
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date --load-postgis
 ```
 
 Salidas:
 ```text
-data/rankings/ranking_hidrico_YYYY-MM-DD.csv
-data/rankings/ranking_hidrico_latest.csv
-data/state/pipeline_hidrico_state.json
-data/logs/pipeline_hidrico_YYYYMMDD_HHMMSS.log
+backend/data/rankings/ranking_hidrico_YYYY-MM-DD.csv
+backend/data/rankings/ranking_hidrico_latest.csv
+backend/data/state/pipeline_hidrico_state.json
+backend/data/logs/pipeline_hidrico_YYYYMMDD_HHMMSS.log
 ```
 
 Los datasets y modelos generados son artefactos locales pesados y quedan
@@ -232,13 +232,13 @@ El despliegue objetivo es UM-Cloud. La guía de acceso/provisionamiento está en
 ## Límite geográfico
 
 El límite local de San Rafael se documenta en `docs/limite_san_rafael.md`.
-Si existe `data/limites/san_rafael.geojson`, el pipeline lo usa para filtrar
+Si existe `backend/data/limites/san_rafael.geojson`, el pipeline lo usa para filtrar
 parcelas y construir la región de consulta GEE. Si no existe, usa el bounding
 box operativo como fallback.
 
 ## PostGIS
 
-La estructura operativa de base de datos está en `sql/schema_postgis.sql`.
+La estructura operativa de base de datos está en `backend/sql/schema_postgis.sql`.
 El flujo de carga está documentado en `docs/postgis.md`.
 
 Levantar PostGIS local:
@@ -250,22 +250,22 @@ docker compose -f docker-compose.postgis.yml up -d
 Aplicar schema y cargar datos operativos:
 
 ```bash
-venv/bin/python scripts/setup_postgis_local.py
+venv/bin/python backend/scripts/postgis/setup_postgis_local.py
 ```
 
 Validar conteos:
 
 ```bash
-venv/bin/python scripts/validar_postgis_local.py
+venv/bin/python backend/scripts/postgis/validar_postgis_local.py
 ```
 
 Pruebas sin conectarse a una base:
 
 ```bash
-venv/bin/python scripts/aplicar_schema_postgis.py --dry-run
-venv/bin/python scripts/cargar_parcelas_postgis.py --dry-run
-venv/bin/python scripts/cargar_ranking_postgis.py --dry-run
-venv/bin/python scripts/setup_postgis_local.py --dry-run
+venv/bin/python backend/scripts/postgis/aplicar_schema_postgis.py --dry-run
+venv/bin/python backend/scripts/postgis/cargar_parcelas_postgis.py --dry-run
+venv/bin/python backend/scripts/postgis/cargar_ranking_postgis.py --dry-run
+venv/bin/python backend/scripts/postgis/setup_postgis_local.py --dry-run
 ```
 
 ## API
@@ -275,20 +275,21 @@ La API mínima está en `app/main.py` y se documenta en `docs/api.md`.
 Ejecutar local:
 
 ```bash
-venv/bin/uvicorn app.main:app --reload
+venv/bin/uvicorn backend.app.main:app --reload
 ```
 
 Ejecutar local leyendo desde PostGIS:
 
 ```bash
 export DATABASE_URL=postgresql://estres:estres_dev@127.0.0.1:5433/estres
-venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Endpoints principales:
 
 ```text
 GET /health
+POST /auth/login
 GET /rankings/latest
 GET /rankings/latest/geojson
 GET /rankings/{fecha}
@@ -348,8 +349,8 @@ Flujo manual equivalente con PostGIS:
 
 ```bash
 docker compose -f docker-compose.postgis.yml up -d
-venv/bin/python scripts/setup_postgis_local.py
-venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+venv/bin/python backend/scripts/postgis/setup_postgis_local.py --all-parcelas
+venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 venv/bin/streamlit run streamlit_app.py
 ```
 
@@ -358,6 +359,10 @@ En el dashboard, la barra lateral debe indicar:
 ```text
 Fuente: postgis
 ```
+
+El login del dashboard usa `POST /auth/login` contra PostGIS cuando la API está
+activa. Los accesos rápidos de desarrollo siguen disponibles en la pantalla de
+login.
 
 ## Verificación mínima
 
@@ -370,25 +375,25 @@ venv/bin/python -m pytest -q
 Ejecutar smoke test operativo contra la API levantada:
 
 ```bash
-venv/bin/python scripts/smoke_test_operativo.py --require-source postgis
+venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis
 ```
 
 Validar PostGIS directo:
 
 ```bash
-venv/bin/python scripts/smoke_test_operativo.py --skip-api --check-postgis
+venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --skip-api --check-postgis
 ```
 
 Validar fallback local CSV/GeoJSON:
 
 ```bash
-venv/bin/python scripts/smoke_test_operativo.py --skip-api --check-local-fallback
+venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --skip-api --check-local-fallback
 ```
 
 Validación completa local, con API y PostGIS:
 
 ```bash
-venv/bin/python scripts/smoke_test_operativo.py --require-source postgis --check-postgis --check-local-fallback
+venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis --check-postgis --check-local-fallback
 ```
 
 ## Artefactos y Git
@@ -396,17 +401,17 @@ venv/bin/python scripts/smoke_test_operativo.py --require-source postgis --check
 Versionar:
 
 ```text
-app/
+backend/app/
+backend/scripts/
+backend/sql/
+backend/models/ranking_hidrico_config.json
 frontend/
-scripts/
-sql/
 docs/
 tests/
 docker-compose.postgis.yml
 .env.local.example
 .env.cloud.example
 .env.postgis.example
-models/ranking_hidrico_config.json
 ```
 
 No versionar:
@@ -414,12 +419,15 @@ No versionar:
 ```text
 .env
 venv/
-data/**/*.csv
-data/**/*.geojson
-data/logs/
-data/state/
-data/rankings/
-models/**/*.pkl
+backend/data/**/*.csv
+backend/data/**/*.geojson
+backend/data/logs/
+backend/data/state/
+backend/data/rankings/
+backend/data/auditorias/
+backend/data/parcelas/*.geojson
+backend/models/**/*.pkl
+backend/models/hidrico_regresion/
 ```
 
 Los CSV/GeoJSON grandes o derivados se regeneran con el pipeline y están
