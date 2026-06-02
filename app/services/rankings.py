@@ -962,6 +962,555 @@ def regional_um_parcelas_latest_geojson(um_id: int) -> dict[str, Any]:
     return data
 
 
+def _require_database_url() -> str:
+    db_url = database_url()
+    if not db_url:
+        raise RuntimeError("Los endpoints admin requieren DATABASE_URL/PostGIS.")
+    return db_url
+
+
+def _clean_postgis_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value.isoformat() if hasattr(value, "isoformat") else value
+        for key, value in row.items()
+    }
+
+
+def admin_parcelas(
+    limit: int | None = None,
+    cultivo: str | None = None,
+    activo: bool | None = True,
+) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    where = []
+    params: list[Any] = []
+    if cultivo:
+        where.append("p.cultivo_oficial = %s")
+        params.append(cultivo)
+    if activo is not None:
+        where.append("p.activo = %s")
+        params.append(activo)
+
+    query = """
+        SELECT
+            p.parcela_id,
+            p.cultivo_oficial,
+            p.cultivo_original,
+            p.area_m2,
+            p.fuente,
+            p.globalid,
+            p.activo,
+            p.updated_at,
+            r.fecha_ranking,
+            r.ranking_global,
+            r.prioridad,
+            r.riesgo_actual
+        FROM parcelas p
+        LEFT JOIN ranking_hidrico_latest r
+            ON r.parcela_id = p.parcela_id
+    """
+    if where:
+        query += " WHERE " + " AND ".join(where)
+    query += " ORDER BY p.parcela_id"
+    if limit:
+        query += " LIMIT %s"
+        params.append(limit)
+
+    with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            rows = [_clean_postgis_row(dict(row)) for row in cur.fetchall()]
+
+    return {"source": "postgis", "count": len(rows), "items": rows}
+
+
+def admin_parcelas_disponibles(limit: int | None = None) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    query = """
+        SELECT
+            p.parcela_id,
+            p.cultivo_oficial,
+            p.cultivo_original,
+            p.area_m2,
+            p.fuente,
+            p.globalid,
+            p.activo,
+            p.updated_at,
+            ST_AsGeoJSON(p.geom)::json AS geometry
+        FROM parcelas p
+        WHERE p.activo = true
+          AND p.cultivo_oficial NOT IN ('vid', 'olivo')
+        ORDER BY p.parcela_id
+    """
+    params: list[Any] = []
+    if limit:
+        query += " LIMIT %s"
+        params.append(limit)
+
+    with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            rows = [_clean_postgis_row(dict(row)) for row in cur.fetchall()]
+
+    return {"source": "postgis", "count": len(rows), "items": rows}
+
+
+def admin_parcela(parcela_id: int) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    query = """
+        SELECT
+            p.parcela_id,
+            p.cultivo_oficial,
+            p.cultivo_original,
+            p.area_m2,
+            p.fuente,
+            p.globalid,
+            p.activo,
+            p.updated_at,
+            ST_AsGeoJSON(p.geom)::json AS geometry,
+            r.fecha_ranking,
+            r.ranking_global,
+            r.prioridad,
+            r.riesgo_actual,
+            r.riesgo_operativo_5d,
+            r.riesgo_operativo_10d
+        FROM parcelas p
+        LEFT JOIN ranking_hidrico_latest r
+            ON r.parcela_id = p.parcela_id
+        WHERE p.parcela_id = %s
+    """
+    with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, [parcela_id])
+            row = cur.fetchone()
+
+    if row is None:
+        raise ValueError(f"Parcela inexistente: {parcela_id}")
+    return {"source": "postgis", "item": _clean_postgis_row(dict(row))}
+
+
+def admin_create_parcela(payload: dict[str, Any]) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    geometry = payload.get("geometry")
+    if not geometry:
+        raise ValueError("geometry es requerido.")
+
+    area_m2 = payload.get("area_m2")
+    query = """
+        INSERT INTO parcelas (
+            parcela_id,
+            cultivo_oficial,
+            cultivo_original,
+            area_m2,
+            fuente,
+            globalid,
+            activo,
+            geom
+        )
+        VALUES (
+            %s,
+            %s,
+            %s,
+            COALESCE(%s, ST_Area(ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)::geography)),
+            %s,
+            %s,
+            %s,
+            ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326))
+        )
+        RETURNING
+            parcela_id,
+            cultivo_oficial,
+            cultivo_original,
+            area_m2,
+            fuente,
+            globalid,
+            activo,
+            updated_at,
+            ST_AsGeoJSON(geom)::json AS geometry
+    """
+    geometry_text = json.dumps(geometry)
+    params = [
+        payload["parcela_id"],
+        payload["cultivo_oficial"],
+        payload.get("cultivo_original"),
+        area_m2,
+        geometry_text,
+        payload.get("fuente", "manual"),
+        payload.get("globalid"),
+        payload.get("activo", True),
+        geometry_text,
+    ]
+
+    with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            item = _clean_postgis_row(dict(cur.fetchone()))
+        conn.commit()
+
+    return {"source": "postgis", "item": item}
+
+
+def admin_update_parcela(parcela_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    assignments = []
+    params: list[Any] = []
+    if "cultivo_oficial" in payload:
+        assignments.append("cultivo_oficial = %s")
+        params.append(payload["cultivo_oficial"])
+    if "area_m2" in payload:
+        assignments.append("area_m2 = %s")
+        params.append(payload["area_m2"])
+    if "cultivo_original" in payload:
+        assignments.append("cultivo_original = %s")
+        params.append(payload["cultivo_original"])
+    if "fuente" in payload:
+        assignments.append("fuente = %s")
+        params.append(payload["fuente"])
+    if "globalid" in payload:
+        assignments.append("globalid = %s")
+        params.append(payload["globalid"])
+    if "activo" in payload:
+        assignments.append("activo = %s")
+        params.append(payload["activo"])
+    if "geometry" in payload:
+        geometry_text = json.dumps(payload["geometry"])
+        assignments.append("geom = ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326))")
+        params.append(geometry_text)
+        if "area_m2" not in payload:
+            assignments.append(
+                "area_m2 = ST_Area(ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326)::geography)"
+            )
+            params.append(geometry_text)
+
+    if not assignments:
+        raise ValueError("No hay campos para actualizar.")
+
+    query = f"""
+        UPDATE parcelas
+        SET {", ".join(assignments)}, updated_at = now()
+        WHERE parcela_id = %s
+        RETURNING
+            parcela_id,
+            cultivo_oficial,
+            cultivo_original,
+            area_m2,
+            fuente,
+            globalid,
+            activo,
+            updated_at,
+            ST_AsGeoJSON(geom)::json AS geometry
+    """
+    params.append(parcela_id)
+
+    with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError(f"Parcela inexistente: {parcela_id}")
+            item = _clean_postgis_row(dict(row))
+        conn.commit()
+
+    return {"source": "postgis", "item": item}
+
+
+def admin_activar_parcela_disponible(
+    parcela_id: int,
+    cultivo_oficial: str,
+    cliente_id: int | None = None,
+    etiqueta: str | None = None,
+) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE parcelas
+                SET cultivo_oficial = %s,
+                    activo = true,
+                    fuente = CASE
+                        WHEN fuente = 'idemendoza' THEN 'idemendoza_admin'
+                        ELSE fuente
+                    END,
+                    updated_at = now()
+                WHERE parcela_id = %s
+                RETURNING
+                    parcela_id,
+                    cultivo_oficial,
+                    cultivo_original,
+                    area_m2,
+                    fuente,
+                    activo,
+                    updated_at
+                """,
+                [cultivo_oficial, parcela_id],
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError(f"Parcela inexistente: {parcela_id}")
+            item = _clean_postgis_row(dict(row))
+
+            assigned = None
+            if cliente_id is not None:
+                cur.execute("SELECT 1 FROM clientes WHERE cliente_id = %s", [cliente_id])
+                if cur.fetchone() is None:
+                    raise ValueError(f"Cliente inexistente: {cliente_id}")
+                cur.execute(
+                    """
+                    INSERT INTO cliente_parcela (cliente_id, parcela_id, etiqueta)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (cliente_id, parcela_id) DO UPDATE SET
+                        etiqueta = EXCLUDED.etiqueta
+                    RETURNING cliente_id, parcela_id, etiqueta, created_at
+                    """,
+                    [cliente_id, parcela_id, etiqueta],
+                )
+                assigned = _clean_postgis_row(dict(cur.fetchone()))
+        conn.commit()
+
+    return {"source": "postgis", "item": item, "cliente_parcela": assigned}
+
+
+def admin_deactivate_parcela(parcela_id: int) -> dict[str, Any]:
+    import psycopg
+
+    with psycopg.connect(_require_database_url()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE parcelas
+                SET activo = false,
+                    updated_at = now()
+                WHERE parcela_id = %s
+                  AND activo = true
+                """,
+                [parcela_id],
+            )
+            updated = cur.rowcount
+        conn.commit()
+
+    if updated == 0:
+        raise ValueError(f"Parcela inexistente o ya inactiva: {parcela_id}")
+    return {"source": "postgis", "deleted": True, "parcela_id": int(parcela_id)}
+
+
+def admin_clientes(limit: int | None = None) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    query = """
+        SELECT
+            c.cliente_id,
+            c.nombre,
+            c.tipo,
+            c.descripcion,
+            c.activo,
+            c.created_at,
+            c.updated_at,
+            count(cp.parcela_id)::integer AS parcelas_asignadas
+        FROM clientes c
+        LEFT JOIN cliente_parcela cp
+            ON cp.cliente_id = c.cliente_id
+        GROUP BY c.cliente_id
+        ORDER BY c.activo DESC, c.tipo, c.nombre
+    """
+    params: list[Any] = []
+    if limit:
+        query += " LIMIT %s"
+        params.append(limit)
+
+    with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            rows = [_clean_postgis_row(dict(row)) for row in cur.fetchall()]
+
+    return {"source": "postgis", "count": len(rows), "items": rows}
+
+
+def admin_cliente_parcelas(cliente_id: int) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    query_cliente = """
+        SELECT cliente_id, nombre, tipo, descripcion, activo
+        FROM clientes
+        WHERE cliente_id = %s
+    """
+    query_parcelas = """
+        SELECT
+            cp.cliente_id,
+            cp.parcela_id,
+            cp.etiqueta,
+            p.cultivo_oficial,
+            p.area_m2,
+            r.ranking_global,
+            r.prioridad,
+            r.riesgo_actual,
+            r.fecha_ranking
+        FROM cliente_parcela cp
+        JOIN parcelas p
+            ON p.parcela_id = cp.parcela_id
+        LEFT JOIN ranking_hidrico_latest r
+            ON r.parcela_id = cp.parcela_id
+        WHERE cp.cliente_id = %s
+        ORDER BY cp.etiqueta NULLS LAST, cp.parcela_id
+    """
+    with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query_cliente, [cliente_id])
+            cliente = cur.fetchone()
+            if cliente is None:
+                raise ValueError(f"Cliente inexistente: {cliente_id}")
+
+            cur.execute(query_parcelas, [cliente_id])
+            parcelas = [_clean_postgis_row(dict(row)) for row in cur.fetchall()]
+
+    return {
+        "source": "postgis",
+        "cliente": _clean_postgis_row(dict(cliente)),
+        "count": len(parcelas),
+        "items": parcelas,
+    }
+
+
+def admin_create_cliente(payload: dict[str, Any]) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    cliente_id = payload.get("cliente_id")
+    nombre = payload.get("nombre")
+    tipo = payload.get("tipo")
+    descripcion = payload.get("descripcion")
+    activo = payload.get("activo", True)
+
+    if cliente_id is None:
+        query = """
+            INSERT INTO clientes (nombre, tipo, descripcion, activo)
+            VALUES (%s, %s, %s, %s)
+            RETURNING cliente_id, nombre, tipo, descripcion, activo, created_at, updated_at
+        """
+        params = [nombre, tipo, descripcion, activo]
+    else:
+        query = """
+            INSERT INTO clientes (cliente_id, nombre, tipo, descripcion, activo)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING cliente_id, nombre, tipo, descripcion, activo, created_at, updated_at
+        """
+        params = [cliente_id, nombre, tipo, descripcion, activo]
+
+    with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            row = _clean_postgis_row(dict(cur.fetchone()))
+        conn.commit()
+
+    return {"source": "postgis", "item": row}
+
+
+def admin_update_cliente(cliente_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    allowed = ["nombre", "tipo", "descripcion", "activo"]
+    updates = [field for field in allowed if field in payload]
+    if not updates:
+        raise ValueError("No hay campos para actualizar.")
+
+    assignments = ", ".join(f"{field} = %s" for field in updates)
+    query = f"""
+        UPDATE clientes
+        SET {assignments}, updated_at = now()
+        WHERE cliente_id = %s
+        RETURNING cliente_id, nombre, tipo, descripcion, activo, created_at, updated_at
+    """
+    params = [payload[field] for field in updates] + [cliente_id]
+
+    with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError(f"Cliente inexistente: {cliente_id}")
+            item = _clean_postgis_row(dict(row))
+        conn.commit()
+
+    return {"source": "postgis", "item": item}
+
+
+def admin_assign_cliente_parcela(
+    cliente_id: int,
+    parcela_id: int,
+    etiqueta: str | None = None,
+) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM clientes WHERE cliente_id = %s", [cliente_id])
+            if cur.fetchone() is None:
+                raise ValueError(f"Cliente inexistente: {cliente_id}")
+
+            cur.execute("SELECT 1 FROM parcelas WHERE parcela_id = %s", [parcela_id])
+            if cur.fetchone() is None:
+                raise ValueError(f"Parcela inexistente: {parcela_id}")
+
+            cur.execute(
+                """
+                INSERT INTO cliente_parcela (cliente_id, parcela_id, etiqueta)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (cliente_id, parcela_id) DO UPDATE SET
+                    etiqueta = EXCLUDED.etiqueta
+                RETURNING cliente_id, parcela_id, etiqueta, created_at
+                """,
+                [cliente_id, parcela_id, etiqueta],
+            )
+            item = _clean_postgis_row(dict(cur.fetchone()))
+        conn.commit()
+
+    return {"source": "postgis", "item": item}
+
+
+def admin_delete_cliente_parcela(cliente_id: int, parcela_id: int) -> dict[str, Any]:
+    import psycopg
+
+    with psycopg.connect(_require_database_url()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM cliente_parcela
+                WHERE cliente_id = %s
+                  AND parcela_id = %s
+                """,
+                [cliente_id, parcela_id],
+            )
+            deleted = cur.rowcount
+        conn.commit()
+
+    if deleted == 0:
+        raise ValueError(
+            f"No existe relación cliente-parcela: cliente_id={cliente_id}, parcela_id={parcela_id}"
+        )
+    return {
+        "source": "postgis",
+        "deleted": True,
+        "cliente_id": int(cliente_id),
+        "parcela_id": int(parcela_id),
+    }
+
+
 def ranking_by_fecha(fecha: str, limit: int | None = None) -> dict[str, Any]:
     fecha = pd.to_datetime(fecha).strftime("%Y-%m-%d")
     if not database_url():

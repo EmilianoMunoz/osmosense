@@ -82,8 +82,8 @@ def render_parcel_summary(row: pd.Series) -> None:
     cols[0].metric("Riesgo actual", f"{row['riesgo_actual']:.1f}" if pd.notna(row.get("riesgo_actual")) else "-")
     riesgo_5d = display_risk(row, 5, admin_mode=True)
     riesgo_10d = display_risk(row, 10, admin_mode=True)
-    cols[1].metric("Predicción 5 días", f"{riesgo_5d:.1f}" if pd.notna(riesgo_5d) else "-")
-    cols[2].metric("Predicción 10 días", f"{riesgo_10d:.1f}" if pd.notna(riesgo_10d) else "-")
+    cols[1].metric("Proyección 5 días", f"{riesgo_5d:.1f}" if pd.notna(riesgo_5d) else "-")
+    cols[2].metric("Proyección 10 días", f"{riesgo_10d:.1f}" if pd.notna(riesgo_10d) else "-")
     cols[3].metric("Ranking", int(row["ranking_global"]) if pd.notna(row.get("ranking_global")) else "-")
 
     st.markdown("**Lectura**")

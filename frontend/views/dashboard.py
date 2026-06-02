@@ -4,7 +4,14 @@ import pandas as pd
 import streamlit as st
 
 from frontend.auth import is_authenticated, render_auth_sidebar, render_login
-from frontend.data import features_to_frame, filtered_geojson, load_clientes, load_geojson
+from frontend.data import (
+    activar_parcela_disponible,
+    features_to_frame,
+    filtered_geojson,
+    load_admin_parcelas_disponibles,
+    load_clientes,
+    load_geojson,
+)
 from frontend.logic import add_dynamic_priority, cliente_changed, priority_options, review_priority
 from frontend.map import bbox_center_zoom, render_map
 from frontend.components.charts import render_distribution, render_prediction_panel
@@ -279,6 +286,7 @@ def render_map_tab(
             zoom=map_zoom,
             selected_id=selected_id,
             admin_mode=admin_mode,
+            risk_animation=not admin_mode,
         )
         if clicked_id is not None:
             st.session_state["selected_parcela_id"] = clicked_id
@@ -318,6 +326,103 @@ def render_data_tab(filtered: pd.DataFrame, admin_mode: bool) -> None:
     st.dataframe(table_df, hide_index=True, width="stretch")
 
 
+def render_available_parcels_tab() -> None:
+    st.subheader("Parcelas disponibles")
+    st.caption("Parcelas activas cuyo cultivo operativo todavía no es vid ni olivo.")
+
+    limit = st.number_input(
+        "Cantidad máxima a cargar en el mapa",
+        min_value=100,
+        max_value=20000,
+        value=3000,
+        step=500,
+    )
+    data = load_admin_parcelas_disponibles(limit=int(limit))
+    df = features_to_frame(data)
+    if df.empty:
+        st.info("No hay parcelas disponibles o la API no está disponible.")
+        return
+
+    st.caption(
+        f"Fuente: {data.get('source', 'desconocida')} · "
+        f"Mostrando {len(df):,} parcelas".replace(",", ".")
+    )
+
+    col_map, col_detail = st.columns([2.2, 1.0])
+    with col_map:
+        color_by = st.selectbox(
+            "Color",
+            ["cultivo_original", "cultivo_oficial", "fuente"],
+            index=0,
+            key="available_color_by",
+        )
+        selected_id = st.session_state.get("selected_disponible_id")
+        clicked_id = render_map(
+            data,
+            df,
+            color_by=color_by,
+            center=None,
+            zoom=8.3,
+            selected_id=selected_id,
+            admin_mode=True,
+            map_key="available_parcels_map",
+        )
+        if clicked_id is not None:
+            st.session_state["selected_disponible_id"] = clicked_id
+
+    with col_detail:
+        st.subheader("Activación")
+        selected_id = st.session_state.get("selected_disponible_id")
+        if selected_id is None:
+            selected_id = int(df.iloc[0]["parcela_id"])
+            st.session_state["selected_disponible_id"] = selected_id
+
+        row = df[df["parcela_id"].astype(int) == int(selected_id)]
+        if row.empty:
+            st.info("Seleccioná una parcela disponible en el mapa.")
+            return
+        item = row.iloc[0]
+        st.write(f"Parcela {int(item['parcela_id'])}")
+        st.write(f"Cultivo original: {item.get('cultivo_original', '-')}")
+        st.write(f"Área: {item.get('area_m2', 0):.0f} m²" if pd.notna(item.get("area_m2")) else "Área: -")
+
+        clientes_data = load_clientes()
+        clientes_items = clientes_data.get("items", [])
+        cliente_options = [None] + [int(cliente["cliente_id"]) for cliente in clientes_items]
+        cliente_labels = {None: "Sin asignar"}
+        cliente_labels.update(
+            {
+                int(cliente["cliente_id"]): f"{cliente['nombre']} · {cliente['tipo']}"
+                for cliente in clientes_items
+            }
+        )
+
+        with st.form("activar_parcela_disponible"):
+            cultivo_destino = st.radio("Nuevo cultivo operativo", ["vid", "olivo"], horizontal=True)
+            cliente_id = st.selectbox(
+                "Asignar cliente",
+                cliente_options,
+                format_func=lambda value: cliente_labels.get(value, str(value)),
+            )
+            etiqueta = st.text_input("Etiqueta interna", value="")
+            submitted = st.form_submit_button("Activar parcela")
+
+        if submitted:
+            try:
+                activar_parcela_disponible(
+                    parcela_id=int(item["parcela_id"]),
+                    cultivo_oficial=cultivo_destino,
+                    cliente_id=cliente_id,
+                    etiqueta=etiqueta or None,
+                )
+            except Exception as exc:
+                st.error(f"No se pudo activar la parcela: {exc}")
+            else:
+                st.success("Parcela activada. Entrará al universo objetivo PostGIS.")
+                st.session_state.pop("selected_disponible_id", None)
+                st.rerun()
+
+
 def render_dashboard() -> None:
     st.set_page_config(
         page_title="Ranking hídrico San Rafael",
@@ -354,8 +459,8 @@ def render_dashboard() -> None:
     filtered_data = filtered_geojson(data, set(filtered["parcela_id"].astype(int)))
 
     if admin_mode:
-        tab_estado, tab_mapa, tab_revision, tab_cobertura, tab_datos = st.tabs(
-            ["Estado", "Mapa operativo", "Revisión técnica", "Cobertura", "Datos"]
+        tab_estado, tab_mapa, tab_disponibles, tab_revision, tab_cobertura, tab_datos = st.tabs(
+            ["Estado", "Mapa operativo", "Disponibles", "Revisión técnica", "Cobertura", "Datos"]
         )
     else:
         render_client_metrics(filtered)
@@ -372,6 +477,8 @@ def render_dashboard() -> None:
     if admin_mode:
         with tab_revision:
             render_review_tab(filtered)
+        with tab_disponibles:
+            render_available_parcels_tab()
         with tab_cobertura:
             render_coverage_tab(df)
 

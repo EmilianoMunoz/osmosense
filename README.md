@@ -61,9 +61,11 @@ DATABASE_URL=postgresql://estres:estres_dev@127.0.0.1:5433/estres
 API_BASE_URL=http://127.0.0.1:8000
 ```
 
-Hay un ejemplo en:
+Ejemplos disponibles:
 
 ```text
+.env.local.example
+.env.cloud.example
 .env.postgis.example
 ```
 
@@ -170,6 +172,11 @@ Actualizando Sentinel-2/GEE antes de rankear:
 venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --skip-if-no-new-date
 ```
 
+Actualizando Sentinel-2/GEE usando parcelas activas desde PostGIS:
+```bash
+venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date
+```
+
 Actualizando solo una ventana reciente para análisis latest/t-5/t-10:
 ```bash
 venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --recent-days 10 --extract-chunk-size 250 --skip-if-no-new-date
@@ -196,7 +203,7 @@ válida resuelta es 2026-05-31, consulta:
 
 Actualizando Sentinel-2/GEE y cargando el ranking en PostGIS:
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --skip-if-no-new-date --load-postgis
+venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date --load-postgis
 ```
 
 Salidas:
@@ -287,6 +294,19 @@ GET /rankings/latest/geojson
 GET /rankings/{fecha}
 GET /clientes
 GET /clientes/{cliente_id}/rankings/latest/geojson
+GET /admin/parcelas
+GET /admin/parcelas/disponibles
+GET /admin/parcelas/{parcela_id}
+POST /admin/parcelas
+POST /admin/parcelas/{parcela_id}/activar-disponible
+PUT /admin/parcelas/{parcela_id}
+DELETE /admin/parcelas/{parcela_id}
+GET /admin/clientes
+POST /admin/clientes
+PUT /admin/clientes/{cliente_id}
+GET /admin/clientes/{cliente_id}/parcelas
+POST /admin/clientes/{cliente_id}/parcelas
+DELETE /admin/clientes/{cliente_id}/parcelas/{parcela_id}
 GET /regional/um/latest
 GET /regional/um/latest/geojson
 GET /regional/um/{um_id}/parcelas/latest/geojson
@@ -297,16 +317,34 @@ GET /regional/um/{um_id}/parcelas/latest/geojson
 El dashboard Streamlit está en `streamlit_app.py` y se documenta en
 `docs/dashboard.md`.
 
-Ejecutar:
+Levantar entorno local completo:
 
 ```bash
-venv/bin/streamlit run streamlit_app.py
+./boot.sh start
+```
+
+Primera carga o recarga completa de PostGIS:
+
+```bash
+./boot.sh start --setup --all-parcelas --smoke
+```
+
+Consultar estado:
+
+```bash
+./boot.sh status
+```
+
+Detener API y dashboard:
+
+```bash
+./boot.sh stop
 ```
 
 Consume `/rankings/latest/geojson` si la API está levantada. Si no, usa CSV y
 GeoJSON locales.
 
-Flujo recomendado con PostGIS:
+Flujo manual equivalente con PostGIS:
 
 ```bash
 docker compose -f docker-compose.postgis.yml up -d
@@ -329,6 +367,30 @@ Ejecutar tests rápidos de ranking/API:
 venv/bin/python -m pytest -q
 ```
 
+Ejecutar smoke test operativo contra la API levantada:
+
+```bash
+venv/bin/python scripts/smoke_test_operativo.py --require-source postgis
+```
+
+Validar PostGIS directo:
+
+```bash
+venv/bin/python scripts/smoke_test_operativo.py --skip-api --check-postgis
+```
+
+Validar fallback local CSV/GeoJSON:
+
+```bash
+venv/bin/python scripts/smoke_test_operativo.py --skip-api --check-local-fallback
+```
+
+Validación completa local, con API y PostGIS:
+
+```bash
+venv/bin/python scripts/smoke_test_operativo.py --require-source postgis --check-postgis --check-local-fallback
+```
+
 ## Artefactos y Git
 
 Versionar:
@@ -341,6 +403,8 @@ sql/
 docs/
 tests/
 docker-compose.postgis.yml
+.env.local.example
+.env.cloud.example
 .env.postgis.example
 models/ranking_hidrico_config.json
 ```

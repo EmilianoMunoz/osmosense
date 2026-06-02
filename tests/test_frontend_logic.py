@@ -10,14 +10,14 @@ from frontend.logic import (
 )
 from frontend import data as frontend_data
 from frontend.data import filtered_geojson
-from frontend.map import enrich_map_hover, map_hover_data
+from frontend.map import enrich_map_hover, map_hover_data, risk_animation_frame
 from frontend.components.charts import parcela_label
 from frontend.components.client_overview import client_status_summary
 from frontend.table_config import CLIENT_FORBIDDEN_COLUMNS, column_labels, table_columns
 
 
 class FrontendLogicTest(unittest.TestCase):
-    def test_display_risk_uses_raw_prediction_for_admin(self):
+    def test_display_risk_uses_operational_projection_for_admin(self):
         row = pd.Series(
             {
                 "riesgo_pred_5d": 62.7,
@@ -25,7 +25,7 @@ class FrontendLogicTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual(display_risk(row, 5, admin_mode=True), 62.7)
+        self.assertEqual(display_risk(row, 5, admin_mode=True), 65.9)
 
     def test_display_risk_uses_operational_projection_for_client(self):
         row = pd.Series(
@@ -117,6 +117,43 @@ class FrontendLogicTest(unittest.TestCase):
         self.assertEqual(result["riesgo_10_dias"].iloc[0], 67.4)
         self.assertEqual(result["delta_10_dias"].iloc[0], 2.9)
 
+    def test_admin_hover_uses_operational_projection(self):
+        df = pd.DataFrame(
+            {
+                "riesgo_pred_5d": [62.7],
+                "riesgo_pred_10d": [60.8],
+                "delta_10d": [-3.6],
+                "riesgo_operativo_5d": [65.9],
+                "riesgo_operativo_10d": [67.4],
+                "delta_operativo_10d": [2.9],
+            }
+        )
+
+        result = enrich_map_hover(df, admin_mode=True)
+
+        self.assertEqual(result["riesgo_5_dias"].iloc[0], 65.9)
+        self.assertEqual(result["riesgo_10_dias"].iloc[0], 67.4)
+        self.assertEqual(result["delta_10_dias"].iloc[0], 2.9)
+
+    def test_risk_animation_frame_interpolates_days_and_categories(self):
+        df = pd.DataFrame(
+            {
+                "parcela_id": list(range(1, 11)),
+                "riesgo_actual": [20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 10.0, 5.0],
+                "riesgo_5_dias": [25.0, 35.0, 45.0, 55.0, 65.0, 75.0, 85.0, 95.0, 15.0, 10.0],
+                "riesgo_10_dias": [30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 20.0, 15.0],
+            }
+        )
+
+        result = risk_animation_frame(df)
+
+        self.assertEqual(sorted(result["dia_proyeccion"].unique().tolist()), list(range(11)))
+        first = result[(result["dia_proyeccion"] == 0) & (result["parcela_id"] == 1)]
+        top = result[(result["dia_proyeccion"] == 0) & (result["parcela_id"] == 8)]
+        self.assertEqual(first["riesgo_mapa"].iloc[0], 20.0)
+        self.assertEqual(top["riesgo_categoria"].iloc[0], "critica")
+        self.assertEqual(first["riesgo_categoria"].iloc[0], "baja")
+
     def test_client_table_does_not_expose_technical_columns(self):
         available = {
             "parcela_id",
@@ -151,10 +188,11 @@ class FrontendLogicTest(unittest.TestCase):
 
         cols = table_columns(admin_mode=True, available_columns=available)
 
-        self.assertIn("riesgo_pred_5d", cols)
-        self.assertIn("riesgo_pred_10d", cols)
         self.assertIn("riesgo_operativo_5d", cols)
         self.assertIn("riesgo_operativo_10d", cols)
+        self.assertIn("riesgo_pred_5d", cols)
+        self.assertIn("riesgo_pred_10d", cols)
+        self.assertLess(cols.index("riesgo_operativo_5d"), cols.index("riesgo_pred_5d"))
         self.assertIn("diagnostico_outlier", cols)
 
     def test_client_table_labels_are_human_readable(self):
@@ -265,6 +303,27 @@ class FrontendLogicTest(unittest.TestCase):
         self.assertEqual(len(result["features"]), 1)
         self.assertEqual(result["features"][0]["properties"], {"parcela_id": 1})
         self.assertEqual(result["features"][0]["geometry"]["type"], "Point")
+
+    def test_admin_disponibles_to_geojson_converts_items_to_features(self):
+        data = {
+            "source": "postgis",
+            "count": 1,
+            "items": [
+                {
+                    "parcela_id": 10,
+                    "cultivo_original": "FRUTALES",
+                    "cultivo_oficial": "frutales",
+                    "geometry": {"type": "Point", "coordinates": [0, 0]},
+                }
+            ],
+        }
+
+        result = frontend_data.admin_disponibles_to_geojson(data)
+
+        self.assertEqual(result["source"], "postgis")
+        self.assertEqual(result["features"][0]["properties"]["parcela_id"], 10)
+        self.assertEqual(result["features"][0]["properties"]["cultivo_original"], "FRUTALES")
+        self.assertNotIn("geometry", result["features"][0]["properties"])
 
     def test_regional_um_parcelas_fallback_keeps_full_properties(self):
         geojson = {

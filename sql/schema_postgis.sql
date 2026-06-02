@@ -3,12 +3,20 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE TABLE IF NOT EXISTS parcelas (
     parcela_id bigint PRIMARY KEY,
     cultivo_oficial text NOT NULL,
+    cultivo_original text,
     area_m2 double precision,
     fuente text DEFAULT 'idemendoza',
     globalid text,
+    activo boolean NOT NULL DEFAULT true,
     updated_at timestamptz DEFAULT now(),
     geom geometry(MultiPolygon, 4326) NOT NULL
 );
+
+ALTER TABLE parcelas
+    ADD COLUMN IF NOT EXISTS activo boolean NOT NULL DEFAULT true;
+
+ALTER TABLE parcelas
+    ADD COLUMN IF NOT EXISTS cultivo_original text;
 
 CREATE INDEX IF NOT EXISTS idx_parcelas_geom
     ON parcelas
@@ -16,6 +24,12 @@ CREATE INDEX IF NOT EXISTS idx_parcelas_geom
 
 CREATE INDEX IF NOT EXISTS idx_parcelas_cultivo
     ON parcelas (cultivo_oficial);
+
+CREATE INDEX IF NOT EXISTS idx_parcelas_cultivo_original
+    ON parcelas (cultivo_original);
+
+CREATE INDEX IF NOT EXISTS idx_parcelas_activo
+    ON parcelas (activo);
 
 CREATE TABLE IF NOT EXISTS observaciones_sentinel (
     parcela_id bigint NOT NULL REFERENCES parcelas(parcela_id),
@@ -139,7 +153,8 @@ SELECT
     p.geom
 FROM ranking_hidrico_latest r
 JOIN parcelas p
-    ON p.parcela_id = r.parcela_id;
+    ON p.parcela_id = r.parcela_id
+WHERE p.activo = true;
 
 CREATE TABLE IF NOT EXISTS clientes (
     cliente_id bigserial PRIMARY KEY,
@@ -226,7 +241,8 @@ JOIN parcelas p
     ON p.parcela_id = cp.parcela_id
 LEFT JOIN ranking_hidrico_latest r
     ON r.parcela_id = cp.parcela_id
-WHERE c.activo = true;
+WHERE c.activo = true
+  AND p.activo = true;
 
 CREATE TABLE IF NOT EXISTS zonas_um (
     um_id bigint PRIMARY KEY,

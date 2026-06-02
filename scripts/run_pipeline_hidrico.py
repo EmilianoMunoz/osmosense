@@ -68,6 +68,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--extract-cloud-threshold", type=float, default=35.0)
     parser.add_argument("--extract-output-sample", default=OUTPUT_SAMPLE)
     parser.add_argument(
+        "--parcel-source",
+        choices=["geojson", "postgis"],
+        default="geojson",
+        help="Fuente de parcelas objetivo para la extracción Sentinel.",
+    )
+    parser.add_argument(
         "--update-recent-window",
         action="store_true",
         help=(
@@ -269,8 +275,12 @@ def actualizar_sentinel(args: argparse.Namespace, log_path: Path) -> None:
         str(args.extract_chunk_size),
         "--cloud-threshold",
         str(args.extract_cloud_threshold),
+        "--parcel-source",
+        args.parcel_source,
         "--resume",
     ]
+    if args.parcel_source == "postgis" and args.database_url:
+        command.extend(["--database-url", args.database_url])
     if args.update_recent_window:
         command.append("--all-target-parcels")
     else:
@@ -630,11 +640,15 @@ def ejecutar_backfill_outlier_history(
         str(args.extract_chunk_size),
         "--cloud-threshold",
         str(args.extract_cloud_threshold),
+        "--parcel-source",
+        args.parcel_source,
         "--all-target-parcels",
         "--target-ids-csv",
         str(ids_path),
         "--resume",
     ]
+    if args.parcel_source == "postgis" and args.database_url:
+        command.extend(["--database-url", args.database_url])
     run_command(command, log_path, args.dry_run)
 
 

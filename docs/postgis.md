@@ -11,15 +11,95 @@ El schema está en:
 sql/schema_postgis.sql
 ```
 
+Las tablas no se generan con models/ORM. Se crean con SQL explícito e
+idempotente:
+
+```sql
+CREATE TABLE IF NOT EXISTS ...
+CREATE INDEX IF NOT EXISTS ...
+CREATE OR REPLACE VIEW ...
+ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...
+```
+
+El script que aplica ese schema es:
+
+```bash
+venv/bin/python scripts/aplicar_schema_postgis.py
+```
+
+El setup completo ejecuta ese schema y luego carga datos operativos:
+
+```bash
+venv/bin/python scripts/setup_postgis_local.py
+```
+
+Motivo de esta decisión: el proyecto todavía no necesita una capa ORM. El SQL
+directo deja claro el contrato geoespacial, evita migraciones prematuras y
+facilita replicar la estructura en UM-Cloud.
+
 Define:
 
-| Tabla / vista | Uso |
-|---|---|
-| `parcelas` | Geometría oficial de parcelas, cultivo oficial y área. |
-| `observaciones_sentinel` | Serie temporal de índices Sentinel-2 por parcela y fecha. |
-| `ranking_hidrico` | Resultado de cada corrida del modelo predictor. |
-| `ranking_hidrico_latest` | Último ranking disponible. |
-| `ranking_hidrico_latest_geo` | Último ranking unido con geometría para mapa. |
+| Tabla / vista                | Uso                                                       |
+|------------------------------|-----------------------------------------------------------|
+| `parcelas`                   | Geometría oficial de parcelas, cultivo oficial y área.    |
+| `observaciones_sentinel`     | Serie temporal de índices Sentinel-2 por parcela y fecha. |
+| `ranking_hidrico`            | Resultado de cada corrida del modelo predictor.           |
+| `ranking_hidrico_latest`     | Último ranking disponible.                                |
+| `ranking_hidrico_latest_geo` | Último ranking unido con geometría para mapa.             |
+| `clientes`                   | Clientes particulares o regionales.                       |
+| `usuarios`                   | Estructura preparada para autenticación futura.           |
+| `cliente_parcela`            | Relación cliente-parcela para vistas particulares.        |
+| `zonas_um`                   | Geometría de unidades de manejo regionales.               |
+| `parcela_um`                 | Relación espacial parcela-UM.                             |
+| `ranking_um`                 | Ranking agregado regional por UM.                         |
+
+### Parcelas manuales
+
+`parcelas` incluye:
+
+```text
+cultivo_original
+fuente
+activo
+```
+
+Las parcelas oficiales cargadas desde IDEMendoza usan `fuente='idemendoza'`.
+Las parcelas agregadas por API admin pueden usar `fuente='manual'`.
+Si una parcela oficial no era vid/olivo y el admin la activa para análisis, se
+mantiene `cultivo_original` con la etiqueta del gobierno y se actualiza
+`cultivo_oficial` a `vid` u `olivo`.
+
+La baja operativa de una parcela se modela con `activo=false`, no con borrado
+físico, para preservar históricos y relaciones. Las vistas operativas filtran
+parcelas activas.
+
+Si se agrega una parcela nueva en PostGIS y se activa como `vid` u `olivo`,
+puede entrar a la próxima extracción Sentinel cuando el pipeline se ejecuta con
+`--parcel-source postgis`.
+
+El extractor temporal ya soporta esa fuente con:
+
+```bash
+venv/bin/python scripts/generar_dataset_temporal_hidrico.py --all-target-parcels --parcel-source postgis --start-date 2026-05-21 --end-date 2026-05-26
+```
+
+Desde el orquestador operativo:
+
+```bash
+venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --load-postgis
+```
+
+Cargar solo vid/olivo:
+
+```bash
+venv/bin/python scripts/setup_postgis_local.py
+```
+
+Cargar todas las parcelas oficiales para habilitar mapa de disponibles:
+
+```bash
+venv/bin/python scripts/setup_postgis_local.py --all-parcelas
+```
 
 ## Configuración
 
@@ -88,6 +168,18 @@ Validar conteos:
 
 ```bash
 venv/bin/python scripts/validar_postgis_local.py
+```
+
+Validar flujo operativo con smoke test:
+
+```bash
+venv/bin/python scripts/smoke_test_operativo.py --skip-api --check-postgis
+```
+
+Con la API levantada y `DATABASE_URL` configurado:
+
+```bash
+venv/bin/python scripts/smoke_test_operativo.py --require-source postgis
 ```
 
 Comandos individuales:

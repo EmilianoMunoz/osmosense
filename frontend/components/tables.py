@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from frontend.logic import review_priority
+from frontend.logic import display_delta, display_risk, review_priority
 from frontend.table_config import column_labels, table_columns
 
 
@@ -70,6 +70,14 @@ def render_cultivo_summary(df: pd.DataFrame) -> None:
     ranked = df[df["ranking_global"].notna()].copy()
     if ranked.empty:
         return
+    ranked["riesgo_10d_display"] = ranked.apply(
+        lambda row: display_risk(row, 10, admin_mode=True),
+        axis=1,
+    )
+    ranked["delta_10d_display"] = ranked.apply(
+        lambda row: display_delta(row, 10, admin_mode=True),
+        axis=1,
+    )
 
     summary = (
         ranked.groupby("cultivo")
@@ -78,8 +86,8 @@ def render_cultivo_summary(df: pd.DataFrame) -> None:
             criticas=("prioridad", lambda s: int((s == "critica").sum())),
             altas=("prioridad", lambda s: int((s == "alta").sum())),
             score_promedio=("prioridad_score", "mean"),
-            riesgo_10d_promedio=("riesgo_pred_10d", "mean"),
-            delta_10d_promedio=("delta_10d", "mean"),
+            riesgo_10d_promedio=("riesgo_10d_display", "mean"),
+            delta_10d_promedio=("delta_10d_display", "mean"),
         )
         .reset_index()
     )
@@ -98,6 +106,14 @@ def render_top_criticas(df: pd.DataFrame, limit: int = 15) -> None:
         return
 
     top = ranked.sort_values("ranking_global").head(limit).copy()
+    top["riesgo_10d_display"] = top.apply(
+        lambda row: display_risk(row, 10, admin_mode=True),
+        axis=1,
+    )
+    top["delta_10d_display"] = top.apply(
+        lambda row: display_delta(row, 10, admin_mode=True),
+        axis=1,
+    )
     cols = [
         "ranking_global",
         "parcela_id",
@@ -105,12 +121,15 @@ def render_top_criticas(df: pd.DataFrame, limit: int = 15) -> None:
         "prioridad",
         "prioridad_score",
         "riesgo_actual",
-        "riesgo_pred_10d",
-        "delta_10d",
+        "riesgo_10d_display",
+        "delta_10d_display",
     ]
-    for col in ["prioridad_score", "riesgo_actual", "riesgo_pred_10d", "delta_10d"]:
+    for col in ["prioridad_score", "riesgo_actual", "riesgo_10d_display", "delta_10d_display"]:
         top[col] = top[col].round(2)
-    st.dataframe(top[cols], hide_index=True, width="stretch")
+    labels = column_labels(cols)
+    labels["riesgo_10d_display"] = "Proyección 10 días"
+    labels["delta_10d_display"] = "Cambio proyectado 10 días"
+    st.dataframe(top[cols].rename(columns=labels), hide_index=True, width="stretch")
 
 
 def build_table_dataframe(filtered: pd.DataFrame, admin_mode: bool) -> pd.DataFrame:

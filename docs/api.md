@@ -175,6 +175,223 @@ CSV de `data/clientes`.
 Este endpoint conserva parcelas asociadas aunque no tengan ranking latest,
 marcándolas como `sin_ranking_latest`.
 
+## Admin clientes
+
+Estos endpoints son de administración operativa y requieren PostGIS
+(`DATABASE_URL`). No tienen fallback CSV porque modifican estado persistente.
+La autenticación real queda pendiente para producción; por ahora son endpoints
+internos para preparar el CRUD del dashboard admin.
+
+## Admin parcelas
+
+Estos endpoints permiten administrar el universo operativo de parcelas en
+PostGIS. Sirven para casos como: una parcela actualmente frutal que el cliente
+informa que pasará a vid y se quiere incorporar al análisis futuro.
+
+La baja es lógica: `DELETE /admin/parcelas/{id}` marca `activo=false`. No borra
+históricos ni rankings previos.
+
+### Listar parcelas
+
+```http
+GET /admin/parcelas
+GET /admin/parcelas?limit=100
+GET /admin/parcelas?cultivo=vid&activo=true
+```
+
+Devuelve parcelas con datos básicos y ranking latest si existe.
+
+### Listar parcelas disponibles
+
+```http
+GET /admin/parcelas/disponibles
+GET /admin/parcelas/disponibles?limit=100
+```
+
+Devuelve parcelas activas cuyo `cultivo_oficial` todavía no es `vid` ni
+`olivo`. Son candidatas para el mapa admin de disponibles.
+
+### Activar parcela disponible como vid/olivo
+
+```http
+POST /admin/parcelas/12345/activar-disponible
+```
+
+Body:
+
+```json
+{
+  "cultivo_oficial": "vid",
+  "cliente_id": 1,
+  "etiqueta": "Nuevo cuadro vid"
+}
+```
+
+`cliente_id` y `etiqueta` son opcionales. Si se envía `cliente_id`, además de
+cambiar la etiqueta operativa de la parcela se crea o actualiza la relación
+`cliente_parcela`.
+
+### Ver parcela con geometría
+
+```http
+GET /admin/parcelas/38695
+```
+
+Devuelve la parcela con `geometry` GeoJSON.
+
+### Crear parcela
+
+```http
+POST /admin/parcelas
+```
+
+Body:
+
+```json
+{
+  "parcela_id": 900001,
+  "cultivo_oficial": "vid",
+  "fuente": "manual",
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [-68.40, -34.70],
+        [-68.39, -34.70],
+        [-68.39, -34.69],
+        [-68.40, -34.69],
+        [-68.40, -34.70]
+      ]
+    ]
+  }
+}
+```
+
+Si `area_m2` no se envía, PostGIS la calcula con `ST_Area(...::geography)`.
+
+Para una parcela que hoy figura como frutal pero pasará a vid, debe cargarse con:
+
+```json
+{"cultivo_oficial": "vid"}
+```
+
+porque ese es el cultivo objetivo que se quiere evaluar.
+
+### Actualizar parcela
+
+```http
+PUT /admin/parcelas/900001
+```
+
+Body parcial:
+
+```json
+{
+  "cultivo_oficial": "olivo",
+  "activo": true
+}
+```
+
+También puede actualizarse `geometry`; si no se envía `area_m2`, se recalcula.
+
+### Desactivar parcela
+
+```http
+DELETE /admin/parcelas/900001
+```
+
+Marca la parcela como inactiva.
+
+### Limitación actual
+
+El CRUD deja la parcela disponible en PostGIS. Para que una parcela nueva sea
+evaluada automáticamente con la próxima imagen Sentinel, el siguiente ajuste
+necesario es permitir que `generar_dataset_temporal_hidrico.py` tome parcelas
+objetivo desde PostGIS además del GeoJSON local.
+
+### Listar clientes
+
+```http
+GET /admin/clientes
+GET /admin/clientes?limit=100
+```
+
+Devuelve clientes activos e inactivos con cantidad de parcelas asignadas.
+
+### Crear cliente
+
+```http
+POST /admin/clientes
+```
+
+Body:
+
+```json
+{
+  "nombre": "Finca Demo",
+  "tipo": "particular",
+  "descripcion": "Cliente de prueba",
+  "activo": true
+}
+```
+
+`tipo` acepta:
+
+```text
+particular
+regional
+```
+
+También se puede enviar `cliente_id` para cargas controladas de demo, aunque en
+producción debería dejarse autogenerado.
+
+### Actualizar cliente
+
+```http
+PUT /admin/clientes/1
+```
+
+Body parcial:
+
+```json
+{
+  "nombre": "Finca Demo Actualizada",
+  "activo": true
+}
+```
+
+### Ver parcelas de cliente
+
+```http
+GET /admin/clientes/1/parcelas
+```
+
+Devuelve las parcelas asociadas con datos básicos de cultivo, área y ranking
+latest cuando existe.
+
+### Asociar parcela a cliente
+
+```http
+POST /admin/clientes/1/parcelas
+```
+
+Body:
+
+```json
+{
+  "parcela_id": 38695,
+  "etiqueta": "Lote norte"
+}
+```
+
+Si la relación ya existe, actualiza `etiqueta`.
+
+### Quitar parcela de cliente
+
+```http
+DELETE /admin/clientes/1/parcelas/38695
+```
+
 ## Endpoints previstos para el mapa
 
 El dashboard Streamlit puede consumir directamente:

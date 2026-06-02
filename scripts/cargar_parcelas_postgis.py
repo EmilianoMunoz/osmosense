@@ -9,6 +9,7 @@ from shapely import wkb
 
 
 INPUT_GEOJSON = "data/parcelas/san_rafael_vid_olivo_wgs84.geojson"
+TARGET_CROPS = {"vid", "olivo"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -16,8 +17,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", default=INPUT_GEOJSON)
     parser.add_argument("--database-url", default=None)
     parser.add_argument("--id-column", default="fid")
-    parser.add_argument("--cultivo-column", default="cultivo")
+    parser.add_argument("--cultivo-column", default=None)
+    parser.add_argument("--cultivo-original-column", default="tipo_culti")
     parser.add_argument("--area-column", default="shape_Area")
+    parser.add_argument(
+        "--all-crops",
+        action="store_true",
+        help="Carga todas las parcelas. Sin este flag solo carga vid/olivo.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -36,6 +43,29 @@ def normalize_geometry(geom):
     return geom
 
 
+def normalize_crop(value: object) -> str:
+    raw = str(value or "").strip().upper()
+    if raw == "VID":
+        return "vid"
+    if raw == "OLIVOS":
+        return "olivo"
+    if raw == "FRUTALES":
+        return "frutales"
+    if raw == "ANUALES":
+        return "anuales"
+    if raw == "INCULTOS":
+        return "incultos"
+    if not raw:
+        return "sin_dato"
+    return raw.lower()
+
+
+def crop_from_row(row, cultivo_column: str | None, cultivo_original_column: str) -> str:
+    if cultivo_column and cultivo_column in row and row[cultivo_column] is not None:
+        return normalize_crop(row[cultivo_column])
+    return normalize_crop(row.get(cultivo_original_column))
+
+
 def main() -> None:
     args = parse_args()
     gdf = gpd.read_file(args.input)
@@ -44,19 +74,32 @@ def main() -> None:
     elif gdf.crs.to_epsg() != 4326:
         gdf = gdf.to_crs("EPSG:4326")
 
-    required = [args.id_column, args.cultivo_column, args.area_column, "geometry"]
+    required = [args.id_column, args.cultivo_original_column, args.area_column, "geometry"]
     missing = [col for col in required if col not in gdf.columns]
     if missing:
         raise RuntimeError(f"Columnas faltantes en {args.input}: {missing}")
 
-    gdf = gdf.dropna(subset=[args.id_column, args.cultivo_column, "geometry"]).copy()
+    gdf = gdf.dropna(subset=[args.id_column, "geometry"]).copy()
     rows = []
     for _, row in gdf.iterrows():
         geom = normalize_geometry(row.geometry)
+        cultivo_oficial = crop_from_row(
+            row,
+            args.cultivo_column,
+            args.cultivo_original_column,
+        )
+        if not args.all_crops and cultivo_oficial not in TARGET_CROPS:
+            continue
+        cultivo_original = (
+            None
+            if row.get(args.cultivo_original_column) is None
+            else str(row.get(args.cultivo_original_column)).strip()
+        )
         rows.append(
             (
                 int(row[args.id_column]),
-                str(row[args.cultivo_column]).lower(),
+                cultivo_oficial,
+                cultivo_original,
                 float(row[args.area_column]) if row[args.area_column] is not None else None,
                 str(row.get("globalid", "")) or None,
                 wkb.dumps(geom, hex=False, srid=4326),
@@ -66,6 +109,7 @@ def main() -> None:
     print("=== Carga parcelas PostGIS ===")
     print("Input:", args.input)
     print("Parcelas:", len(rows))
+    print("Todas las categorias:", args.all_crops)
     print("Dry run:", args.dry_run)
     if args.dry_run:
         return
@@ -79,13 +123,15 @@ def main() -> None:
 
     sql = """
         INSERT INTO parcelas (
-            parcela_id, cultivo_oficial, area_m2, globalid, geom
+            parcela_id, cultivo_oficial, cultivo_original, area_m2, globalid, activo, geom
         )
-        VALUES (%s, %s, %s, %s, ST_Multi(ST_SetSRID(ST_GeomFromWKB(%s), 4326)))
+        VALUES (%s, %s, %s, %s, %s, true, ST_Multi(ST_SetSRID(ST_GeomFromWKB(%s), 4326)))
         ON CONFLICT (parcela_id) DO UPDATE SET
             cultivo_oficial = EXCLUDED.cultivo_oficial,
+            cultivo_original = EXCLUDED.cultivo_original,
             area_m2 = EXCLUDED.area_m2,
             globalid = EXCLUDED.globalid,
+            activo = true,
             geom = EXCLUDED.geom,
             updated_at = now()
     """

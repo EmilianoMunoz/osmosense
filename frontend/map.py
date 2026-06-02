@@ -14,6 +14,21 @@ from frontend.constants import (
     PRIORIDAD_ORDEN_MAPA,
 )
 
+RISK_ANIMATION_ORDER = ["baja", "media", "alta", "critica"]
+
+
+def risk_category(value: Any) -> str:
+    if pd.isna(value):
+        return "sin ranking"
+    value = float(value)
+    if value < 35:
+        return "baja"
+    if value < 47.5:
+        return "media"
+    if value < 55:
+        return "alta"
+    return "critica"
+
 
 def map_color_config(color_by: str) -> tuple[dict[str, str] | None, dict[str, list[str]] | None, str]:
     if color_by == "prioridad_visual":
@@ -22,6 +37,12 @@ def map_color_config(color_by: str) -> tuple[dict[str, str] | None, dict[str, li
         return CONFIANZA_COLOR, {"confianza_lectura": ["alta", "media", "baja", "sin_ranking"]}, "Confianza"
     if color_by == "accion_visual":
         return ACCION_COLOR, {"accion_visual": list(ACCION_COLOR)}, "Acción"
+    if color_by == "cultivo_original":
+        return None, None, "Cultivo original"
+    if color_by == "cultivo_oficial":
+        return None, None, "Cultivo operativo"
+    if color_by == "fuente":
+        return None, None, "Fuente"
     return PRIORIDAD_COLOR, {"prioridad": PRIORIDAD_ORDEN_MAPA}, "Prioridad"
 
 
@@ -89,26 +110,21 @@ def bbox_center_zoom(data: dict[str, Any]) -> tuple[dict[str, float], float]:
 
 def enrich_map_hover(df: pd.DataFrame, admin_mode: bool) -> pd.DataFrame:
     df_map = df.copy()
-    if admin_mode:
-        df_map["riesgo_5_dias"] = df_map.get("riesgo_pred_5d")
-        df_map["riesgo_10_dias"] = df_map.get("riesgo_pred_10d")
-        df_map["delta_10_dias"] = df_map.get("delta_10d")
-    else:
-        df_map["riesgo_5_dias"] = (
-            df_map["riesgo_operativo_5d"].fillna(df_map["riesgo_pred_5d"])
-            if {"riesgo_operativo_5d", "riesgo_pred_5d"}.issubset(df_map.columns)
-            else df_map.get("riesgo_pred_5d")
-        )
-        df_map["riesgo_10_dias"] = (
-            df_map["riesgo_operativo_10d"].fillna(df_map["riesgo_pred_10d"])
-            if {"riesgo_operativo_10d", "riesgo_pred_10d"}.issubset(df_map.columns)
-            else df_map.get("riesgo_pred_10d")
-        )
-        df_map["delta_10_dias"] = (
-            df_map["delta_operativo_10d"].fillna(df_map["delta_10d"])
-            if {"delta_operativo_10d", "delta_10d"}.issubset(df_map.columns)
-            else df_map.get("delta_10d")
-        )
+    df_map["riesgo_5_dias"] = (
+        df_map["riesgo_operativo_5d"].fillna(df_map["riesgo_pred_5d"])
+        if {"riesgo_operativo_5d", "riesgo_pred_5d"}.issubset(df_map.columns)
+        else df_map.get("riesgo_pred_5d")
+    )
+    df_map["riesgo_10_dias"] = (
+        df_map["riesgo_operativo_10d"].fillna(df_map["riesgo_pred_10d"])
+        if {"riesgo_operativo_10d", "riesgo_pred_10d"}.issubset(df_map.columns)
+        else df_map.get("riesgo_pred_10d")
+    )
+    df_map["delta_10_dias"] = (
+        df_map["delta_operativo_10d"].fillna(df_map["delta_10d"])
+        if {"delta_operativo_10d", "delta_10d"}.issubset(df_map.columns)
+        else df_map.get("delta_10d")
+    )
     return df_map
 
 
@@ -123,6 +139,10 @@ def map_hover_data(admin_mode: bool, df: pd.DataFrame) -> dict[str, Any]:
             "delta_10_dias": ":.1f",
             "parcela_id": False,
         }
+        if "riesgo_mapa" in df.columns:
+            hover_data["riesgo_mapa"] = ":.1f"
+        if "dia_proyeccion" in df.columns:
+            hover_data["dia_proyeccion"] = True
         if "confianza_lectura" in df.columns:
             hover_data["confianza_lectura"] = True
         return hover_data
@@ -163,6 +183,34 @@ def map_hover_data(admin_mode: bool, df: pd.DataFrame) -> dict[str, Any]:
     return {column: value for column, value in hover_data.items() if column in df.columns}
 
 
+def risk_animation_frame(df: pd.DataFrame) -> pd.DataFrame:
+    frames = []
+    for day in range(0, 11):
+        frame = df.copy()
+        if day <= 5:
+            ratio = day / 5 if day else 0
+            frame["riesgo_mapa"] = (
+                frame["riesgo_actual"]
+                + (frame["riesgo_5_dias"] - frame["riesgo_actual"]) * ratio
+            )
+        else:
+            ratio = (day - 5) / 5
+            frame["riesgo_mapa"] = (
+                frame["riesgo_5_dias"]
+                + (frame["riesgo_10_dias"] - frame["riesgo_5_dias"]) * ratio
+            )
+        frame["dia_proyeccion"] = day
+        frame["riesgo_categoria"] = "sin ranking"
+        ranked = frame["riesgo_mapa"].notna()
+        pct = frame.loc[ranked, "riesgo_mapa"].rank(pct=True, ascending=False)
+        frame.loc[ranked & (pct <= 0.10), "riesgo_categoria"] = "critica"
+        frame.loc[ranked & (pct > 0.10) & (pct <= 0.30), "riesgo_categoria"] = "alta"
+        frame.loc[ranked & (pct > 0.30) & (pct <= 0.60), "riesgo_categoria"] = "media"
+        frame.loc[ranked & (pct > 0.60), "riesgo_categoria"] = "baja"
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True)
+
+
 def render_map(
     data: dict[str, Any],
     df: pd.DataFrame,
@@ -171,6 +219,10 @@ def render_map(
     zoom: float = 8.3,
     selected_id: int | None = None,
     admin_mode: bool = True,
+    map_key: str = "ranking_map",
+    numeric_color: str | None = None,
+    numeric_color_title: str = "Riesgo",
+    risk_animation: bool = False,
 ) -> int | None:
     if df.empty:
         st.warning("No hay parcelas para mostrar con los filtros actuales.")
@@ -179,34 +231,90 @@ def render_map(
     df_map = enrich_map_hover(df, admin_mode)
     center_lat = center["lat"] if center else -34.6
     center_lon = center["lon"] if center else -68.35
-    hover_data = map_hover_data(admin_mode, df)
+    hover_data = map_hover_data(admin_mode, df_map)
 
     color_map, category_orders, legend_title = map_color_config(color_by)
-    if color_by not in df.columns:
+    if numeric_color is None and color_by not in df.columns:
         color_by = "prioridad"
         color_map, category_orders, legend_title = map_color_config(color_by)
 
-    fig = px.choropleth_mapbox(
-        df_map,
-        geojson=data,
-        locations="parcela_id",
-        featureidkey="properties.parcela_id",
-        color=color_by,
-        color_discrete_map=color_map,
-        category_orders=category_orders,
-        hover_name="parcela_id",
-        hover_data=hover_data,
-        custom_data=["parcela_id"],
-        center={"lat": center_lat, "lon": center_lon},
-        zoom=zoom,
-        opacity=0.68,
-        height=650,
-        mapbox_style="carto-positron",
-    )
+    if risk_animation and not admin_mode:
+        df_anim = risk_animation_frame(df_map)
+        hover_data = map_hover_data(admin_mode, df_anim)
+        fig = px.choropleth_mapbox(
+            df_anim,
+            geojson=data,
+            locations="parcela_id",
+            featureidkey="properties.parcela_id",
+            color="riesgo_categoria",
+            color_discrete_map=PRIORIDAD_COLOR,
+            category_orders={"riesgo_categoria": RISK_ANIMATION_ORDER},
+            animation_frame="dia_proyeccion",
+            hover_name="parcela_id",
+            hover_data=hover_data,
+            custom_data=["parcela_id"],
+            center={"lat": center_lat, "lon": center_lon},
+            zoom=zoom,
+            opacity=0.72,
+            height=650,
+            mapbox_style="carto-positron",
+        )
+        legend_title = "Estrés hídrico"
+        if fig.layout.sliders:
+            slider = fig.layout.sliders[0].to_plotly_json()
+            slider["currentvalue"] = {"prefix": "Proyección: ", "suffix": " días"}
+            slider["pad"] = {"t": 24}
+            fig.update_layout(sliders=[slider])
+    elif numeric_color is not None and numeric_color in df_map.columns:
+        fig = px.choropleth_mapbox(
+            df_map,
+            geojson=data,
+            locations="parcela_id",
+            featureidkey="properties.parcela_id",
+            color=numeric_color,
+            color_continuous_scale=[
+                [0.0, "#1a9850"],
+                [0.35, "#91cf60"],
+                [0.55, "#ffffbf"],
+                [0.75, "#fdae61"],
+                [1.0, "#d7191c"],
+            ],
+            range_color=[0, 100],
+            hover_name="parcela_id",
+            hover_data=hover_data,
+            custom_data=["parcela_id"],
+            center={"lat": center_lat, "lon": center_lon},
+            zoom=zoom,
+            opacity=0.72,
+            height=650,
+            mapbox_style="carto-positron",
+        )
+        fig.update_layout(coloraxis_colorbar={"title": numeric_color_title})
+        legend_title = numeric_color_title
+    else:
+        fig = px.choropleth_mapbox(
+            df_map,
+            geojson=data,
+            locations="parcela_id",
+            featureidkey="properties.parcela_id",
+            color=color_by,
+            color_discrete_map=color_map,
+            category_orders=category_orders,
+            hover_name="parcela_id",
+            hover_data=hover_data,
+            custom_data=["parcela_id"],
+            center={"lat": center_lat, "lon": center_lon},
+            zoom=zoom,
+            opacity=0.68,
+            height=650,
+            mapbox_style="carto-positron",
+        )
     fig.update_layout(
         margin={"r": 0, "t": 0, "l": 0, "b": 0},
         legend_title_text=legend_title,
+        uirevision=map_key,
     )
+    fig.update_mapboxes(uirevision=map_key)
     if selected_id is not None:
         selected_features = [
             feature
@@ -232,7 +340,7 @@ def render_map(
     selection = st.plotly_chart(
         fig,
         width="stretch",
-        key="ranking_map",
+        key=map_key,
         on_select="rerun",
         selection_mode="points",
     )

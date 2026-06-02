@@ -17,6 +17,18 @@ Levantar el dashboard:
 venv/bin/streamlit run streamlit_app.py
 ```
 
+Levantar API, PostGIS y dashboard juntos:
+
+```bash
+./boot.sh start
+```
+
+Primera carga completa:
+
+```bash
+./boot.sh start --setup --all-parcelas --smoke
+```
+
 ## Acceso
 
 El dashboard abre primero una pantalla de login. En esta etapa el login es
@@ -24,12 +36,12 @@ local/de desarrollo, no autenticación productiva.
 
 Usuarios demo:
 
-| Usuario | Contraseña | Vista |
-|---------|------------|-------|
-| `admin` | `admin123` | Admin |
-| `finca` | `cliente123` | Cliente vid |
-| `olivar` | `cliente123` | Cliente olivo |
-| `regional` | `regional123` | Regional |
+| Usuario    | Contraseña    | Vista         |
+|------------|---------------|---------------|
+| `admin`    | `admin123`    | Admin         |
+| `finca`    | `cliente123`  | Cliente vid   |
+| `olivar`   | `cliente123`  | Cliente olivo |
+| `regional` | `regional123` | Regional      |
 
 La pantalla conserva accesos rápidos para desarrollo:
 
@@ -70,22 +82,22 @@ frontend/views/regional.py
 
 Responsabilidades:
 
-| Archivo | Responsabilidad |
-|---------|-----------------|
-| `streamlit_app.py` | Entrypoint mínimo. |
-| `frontend/auth.py` | Login, logout y sesión demo. |
-| `frontend/data.py` | Carga desde API/local y normalización a DataFrame. |
-| `frontend/logic.py` | Prioridad dinámica, selección de valores visibles y reglas puras. |
-| `frontend/map.py` | Mapa, zoom, hover y selección de parcela. |
-| `frontend/table_config.py` | Columnas visibles, labels y restricciones por rol. |
-| `frontend/components/client_overview.py` | Estado general del campo en vista cliente. |
-| `frontend/components/metrics.py` | Métricas resumen. |
-| `frontend/components/parcel_detail.py` | Detalle y pop-up de parcela. |
-| `frontend/components/tables.py` | Tablas y resúmenes tabulares. |
-| `frontend/components/charts.py` | Gráficos de proyección y distribución. |
-| `frontend/panels.py` | Fachada de compatibilidad para componentes. |
-| `frontend/views/dashboard.py` | Orquestación de la vista Streamlit. |
-| `frontend/views/regional.py` | Vista de zonificación DGI recortada a San Rafael. |
+| Archivo                                  | Responsabilidad                                   |
+|------------------------------------------|---------------------------------------------------|
+| `streamlit_app.py`                       | Entrypoint mínimo.                                |
+| `frontend/auth.py`                       | Login, logout y sesión demo.                      |
+| `frontend/data.py`                       | Carga desde API/local y normalización a DataFrame.|
+| `frontend/logic.py`                      | Prioridad dinámica, selección de valores visibles y reglas puras. |
+| `frontend/map.py`                        | Mapa, zoom, hover y selección de parcela.         |
+| `frontend/table_config.py`               | Columnas visibles, labels y restricciones por rol.|
+| `frontend/components/client_overview.py` | Estado general del campo en vista cliente.        |
+| `frontend/components/metrics.py`         | Métricas resumen.                                 |
+| `frontend/components/parcel_detail.py`   | Detalle y pop-up de parcela.                      |
+| `frontend/components/tables.py`          | Tablas y resúmenes tabulares.                     |
+| `frontend/components/charts.py`          | Gráficos de proyección y distribución.            |
+| `frontend/panels.py`                     | Fachada de compatibilidad para componentes.       |
+| `frontend/views/dashboard.py`            | Orquestación de la vista Streamlit.               |
+| `frontend/views/regional.py`             | Vista de zonificación DGI recortada a San Rafael. |
 
 El objetivo es mantener separada la lógica testeable de la composición visual.
 
@@ -103,6 +115,8 @@ Endpoints usados:
 GET /rankings/latest/geojson
 GET /clientes
 GET /clientes/{cliente_id}/rankings/latest/geojson
+GET /admin/parcelas/disponibles
+POST /admin/parcelas/{parcela_id}/activar-disponible
 ```
 
 Si la API no responde, usa fallback local:
@@ -121,18 +135,33 @@ data/parcelas/san_rafael_vid_olivo_wgs84.geojson
 - filtros por cultivo, prioridad, confianza y rango de ranking;
 - pestaña de estado general con métricas del universo completo y de la vista
   activa;
-- panel de predicción actual, 5 días y 10 días;
+- panel de proyección actual, 5 días y 10 días;
 - pestaña de revisión técnica de outliers/calidad;
+- pestaña de parcelas disponibles para activar no vid/no olivo como `vid` u
+  `olivo` y asignarlas opcionalmente a un cliente;
 - pestaña de cobertura con evaluadas, sin ranking y confianza de lectura;
 - top de parcelas críticas;
 - resumen por cultivo;
 - tabla completa de ranking y auditoría.
+
+La vista Admin muestra proyecciones operativas:
+
+```text
+riesgo_operativo_5d
+riesgo_operativo_10d
+delta_operativo_10d
+```
+
+Si una corrida antigua no tiene esas columnas, el frontend hace fallback a las
+predicciones crudas `riesgo_pred_*`.
 
 ### Cliente
 
 - selector local de cliente;
 - estado general del campo antes del mapa;
 - mapa limitado a parcelas asociadas al cliente;
+- slider bajo el mapa para visualizar riesgo actual, proyección 5 días y
+  proyección 10 días con categorías relativas al campo visible;
 - métricas operativas orientadas a detección de estrés hídrico;
 - panel de proyección por parcela a 5 y 10 días;
 - tabla simplificada de sus parcelas con nombres legibles;
@@ -153,14 +182,20 @@ condición actual. La proyección sube o se mantiene con el paso de los días, t
 en cuenta tendencia reciente, cultivo y estación, y evita mostrar mejoras que
 en el histórico pudieron deberse a riego o lluvia entre imágenes.
 
-La vista admin conserva las predicciones ML crudas:
+En el mapa cliente, el slider temporal colorea de verde a rojo según la posición
+relativa de cada parcela dentro del campo visible para cada día interpolado. Esto
+mantiene consistencia con el criterio `Dentro de mi campo` de la tabla.
+
+La vista admin puede conservar columnas de predicción ML cruda en tablas
+técnicas:
 
 ```text
 riesgo_pred_5d
 riesgo_pred_10d
 ```
 
-para auditoría técnica.
+pero la visualización principal de mapa, popup y panel usa la proyección
+operativa.
 
 Para habilitar clientes en fallback local:
 
@@ -239,11 +274,11 @@ data/auditoria_cobertura_parcelas.geojson
 
 Estados posibles:
 
-| Estado | Significado |
-|---|---|
-| `rankeada` | Tiene historial y aparece en el ranking latest. |
+| Estado                             | Significado                                              |
+|------------------------------------|----------------------------------------------------------|
+| `rankeada` | Tiene historial y aparece en el ranking latest.                                  |
 | `con_historial_sin_ranking_latest` | Tiene historial, pero no observación válida/ranking en la fecha latest. |
-| `sin_historial` | No fue incluida en el dataset temporal actual. |
+| `sin_historial`                    | No fue incluida en el dataset temporal actual.           |
 
 Estado actual:
 

@@ -49,6 +49,49 @@ def fetch_cliente_geojson_from_api(base_url: str, cliente_id: int) -> dict[str, 
 
 
 @st.cache_data(show_spinner=False)
+def fetch_admin_parcelas_disponibles_from_api(
+    base_url: str,
+    limit: int | None = None,
+) -> dict[str, Any] | None:
+    try:
+        params = {"limit": limit} if limit else None
+        response = requests.get(
+            f"{base_url}/admin/parcelas/disponibles",
+            params=params,
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException:
+        return None
+
+
+def activar_parcela_disponible(
+    parcela_id: int,
+    cultivo_oficial: str,
+    cliente_id: int | None = None,
+    etiqueta: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"cultivo_oficial": cultivo_oficial}
+    if cliente_id is not None:
+        payload["cliente_id"] = int(cliente_id)
+    if etiqueta:
+        payload["etiqueta"] = etiqueta
+
+    response = requests.post(
+        f"{api_base_url()}/admin/parcelas/{int(parcela_id)}/activar-disponible",
+        json=payload,
+        timeout=10,
+    )
+    response.raise_for_status()
+    fetch_admin_parcelas_disponibles_from_api.clear()
+    fetch_geojson_from_api.clear()
+    fetch_clientes_from_api.clear()
+    fetch_cliente_geojson_from_api.clear()
+    return response.json()
+
+
+@st.cache_data(show_spinner=False)
 def fetch_regional_um_geojson_from_api(base_url: str) -> dict[str, Any] | None:
     try:
         response = requests.get(f"{base_url}/regional/um/latest/geojson", timeout=5)
@@ -119,6 +162,35 @@ def load_geojson(cliente_id: int | None = None) -> dict[str, Any]:
     if data is not None:
         return data
     return load_geojson_local()
+
+
+def admin_disponibles_to_geojson(data: dict[str, Any]) -> dict[str, Any]:
+    features = []
+    for item in data.get("items", []):
+        geometry = item.get("geometry")
+        if not geometry:
+            continue
+        properties = {key: value for key, value in item.items() if key != "geometry"}
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": geometry,
+                "properties": properties,
+            }
+        )
+    return {
+        "type": "FeatureCollection",
+        "source": data.get("source"),
+        "features": features,
+        "count": data.get("count", len(features)),
+    }
+
+
+def load_admin_parcelas_disponibles(limit: int | None = 3000) -> dict[str, Any]:
+    data = fetch_admin_parcelas_disponibles_from_api(api_base_url(), limit=limit)
+    if data is None:
+        return {"source": "api_unavailable", "count": 0, "items": []}
+    return admin_disponibles_to_geojson(data)
 
 
 def features_to_frame(data: dict[str, Any]) -> pd.DataFrame:

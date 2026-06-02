@@ -7,7 +7,7 @@ de vid y olivo en San Rafael, Mendoza, usando series temporales de
 Sentinel-2.
 
 El modelo no predice una medición fisiológica directa de campo. Predice
-un **riesgo hídrico satelital relativo** construido a partir de índices
+un **riesgo hídrico satelital** construido a partir de índices
 espectrales sensibles a agua, vigor y sequedad.
 
 La unidad de predicción es:
@@ -155,13 +155,13 @@ item["riesgo_hidrico"] = (100 * riesgo).clip(0, 100)
 
 ### Pesos del score
 
-| Componente | Peso | Criterio |
-|------------|------|----------|
-| NDMI | 0.35 | Señal principal de contenido de agua foliar. Menor NDMI implica mayor riesgo. |
-| MSI | 0.30 | Señal directa de estrés/sequedad. Mayor MSI implica mayor riesgo. |
-| NDWI | 0.15 | Complementa información hídrica superficial/dosel. Menor NDWI implica mayor riesgo. |
-| NBR | 0.10 | Aporta información de sequedad/biomasa. Menor NBR implica mayor riesgo. |
-| NDVI | 0.10 | Aporta vigor general, pero con menor peso porque puede reflejar fenología y no solo agua. |
+| Componente | Peso | Criterio                                                                                  |
+|------------|------|-------------------------------------------------------------------------------------------|
+| NDMI       | 0.35 | Señal principal de contenido de agua foliar. Menor NDMI implica mayor riesgo.             |
+| MSI        | 0.30 | Señal directa de estrés/sequedad. Mayor MSI implica mayor riesgo.                         |
+| NDWI       | 0.15 | Complementa información hídrica superficial/dosel. Menor NDWI implica mayor riesgo.       |
+| NBR        | 0.10 | Aporta información de sequedad/biomasa. Menor NBR implica mayor riesgo.                   |
+| NDVI       | 0.10 | Aporta vigor general, pero con menor peso porque puede reflejar fenología y no solo agua. |
 
 El score está acotado a:
 
@@ -390,18 +390,18 @@ XGBRegressor(
 
 ### Interpretación de parámetros
 
-| Parámetro | Valor | Función |
-|-----------|-------|---------|
-| objective | reg:squarederror | Regresión continua minimizando error cuadrático. |
-| n_estimators | 450 | Cantidad de árboles. |
-| max_depth | 4 | Profundidad máxima de cada árbol. Controla complejidad. |
-| learning_rate | 0.035 | Paso de aprendizaje. Valores bajos reducen sobreajuste. |
-| subsample | 0.9 | Usa 90% de filas por árbol. |
-| colsample_bytree | 0.85 | Usa 85% de columnas por árbol. |
-| gamma | 0.05 | Ganancia mínima para dividir un nodo. |
-| min_child_weight | 2 | Evita divisiones con poca evidencia. |
-| reg_lambda | 1.5 | Regularización L2. |
-| tree_method | hist | Entrenamiento eficiente para datasets grandes. |
+| Parámetro        | Valor            | Función                                                 |
+|------------------|------------------|---------------------------------------------------------|
+| objective        | reg:squarederror | Regresión continua minimizando error cuadrático.        |
+| n_estimators     | 450              | Cantidad de árboles.                                    |
+| max_depth        | 4                | Profundidad máxima de cada árbol. Controla complejidad. |
+| learning_rate    | 0.035            | Paso de aprendizaje. Valores bajos reducen sobreajuste. |
+| subsample        | 0.9              | Usa 90% de filas por árbol.                             |
+| colsample_bytree | 0.85             | Usa 85% de columnas por árbol.                          |
+| gamma            | 0.05             | Ganancia mínima para dividir un nodo.                   |
+| min_child_weight | 2                | Evita divisiones con poca evidencia.                    |
+| reg_lambda       | 1.5              | Regularización L2.                                      |
+| tree_method      | hist             | Entrenamiento eficiente para datasets grandes.          |
 
 ---
 
@@ -594,8 +594,8 @@ calidad de imagen. El desempeño quedó prácticamente igual.
 
 Importancia agregada por grupo para `riesgo_hidrico_future`:
 
-| Cultivo | Horizonte | Contexto relativo | Estado actual | Tendencia reciente | Lags | Historial |
-|---------|-----------|-------------------|---------------|--------------------|------|-----------|
+| Cultivo | Horizonte | Contexto relativo | Estado actual | Tendencia reciente | Lags  | Historial |
+|---------|-----------|-------------------|---------------|--------------------|-------|-----------|
 | olivo   | 5 días    | 0.599             | 0.185         | 0.055              | 0.047 | 0.023     |
 | olivo   | 10 días   | 0.718             | 0.075         | 0.059              | 0.042 | 0.033     |
 | vid     | 5 días    | 0.615             | 0.176         | 0.054              | 0.059 | 0.025     |
@@ -657,13 +657,13 @@ models/ranking_hidrico_config.json
 
 Pesos calibrados:
 
-| Variable | Peso |
-|----------|------|
-| riesgo_pred_10d | 0.25 |
-| riesgo_pred_5d | 0.15 |
+| Variable           | Peso |
+|--------------------|------|
+| riesgo_pred_10d    | 0.25 |
+| riesgo_pred_5d     | 0.15 |
 | delta_10d positivo | 0.30 |
-| delta_5d positivo | 0.00 |
-| riesgo_actual | 0.30 |
+| delta_5d positivo  | 0.00 |
+| riesgo_actual      | 0.30 |
 
 Fórmula:
 
@@ -680,19 +680,19 @@ Umbrales calibrados:
 
 | Prioridad | Umbral de score |
 |-----------|-----------------|
-| crítica | >= 55.0 |
-| alta | >= 47.5 |
-| media | >= 35.0 |
-| baja | < 35.0 |
+| crítica   | >= 55.0         |
+| alta      | >= 47.5         |
+| media     | >= 35.0         |
+| baja      | < 35.0          |
 
 Métricas de la fórmula calibrada:
 
-| Métrica | Valor |
-|---------|-------|
-| fechas evaluadas | 12 |
-| Spearman 5d | 0.964 |
-| Spearman 10d | 0.939 |
-| Top10 overlap 5d | 0.852 |
+| Métrica           | Valor |
+|-------------------|-------|
+| fechas evaluadas  | 12    |
+| Spearman 5d       | 0.964 |
+| Spearman 10d      | 0.939 |
+| Top10 overlap 5d  | 0.852 |
 | Top10 overlap 10d | 0.814 |
 
 Interpretación:

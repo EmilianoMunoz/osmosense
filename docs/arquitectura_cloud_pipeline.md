@@ -68,12 +68,12 @@ venv/bin/python scripts/run_pipeline_hidrico.py --mode cloud
 
 ## Entradas esperadas
 
-| Entrada | Ubicación prevista | Nota |
-|---|---|---|
-| Parcelas base | `data/parcelas/` | Geometrías/etiquetas oficiales o muestra operativa. |
-| Dataset temporal | `data/dataset_temporal_hidrico.csv` | Regenerable; no debe versionarse en Git. |
+| Entrada              | Ubicación prevista| Nota                                               |
+|----------------------|-------------------|----------------------------------------------------|
+| Parcelas base        | `data/parcelas/`  | Geometrías/etiquetas oficiales o muestra operativa.|
+| Dataset temporal     | `data/dataset_temporal_hidrico.csv` | Regenerable; no debe versionarse en Git. |
 | Modelos de regresión | `models/hidrico_regresion/*.pkl` | Artefactos pesados; idealmente subir por release/artifact, no Git normal. |
-| Configuración GEE | `.env` + credenciales EE | No versionar secretos. |
+| Configuración GEE    | `.env` + credenciales EE | No versionar secretos. |
 
 ## Salidas operativas
 
@@ -141,10 +141,10 @@ Implicaciones:
 
 Security group inicial:
 
-| Puerto | Uso | Origen |
-|---|---|---|
-| 22 | SSH | `192.168.3.0/24` |
-| 8000 | FastAPI futura | `192.168.3.0/24` o túnel |
+| Puerto | Uso            | Origen                   |
+|--------|----------------|--------------------------|
+| 22     | SSH            | `192.168.3.0/24`         |
+| 8000   | FastAPI futura | `192.168.3.0/24` o túnel |
 
 ## Decisión actual
 

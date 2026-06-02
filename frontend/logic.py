@@ -72,16 +72,12 @@ def display_value(row: pd.Series, primary: str, fallback: str | None = None) -> 
 def display_risk(row: pd.Series, horizon: int, admin_mode: bool = True) -> Any:
     raw_col = f"riesgo_pred_{horizon}d"
     op_col = f"riesgo_operativo_{horizon}d"
-    if admin_mode:
-        return row.get(raw_col)
     return display_value(row, op_col, raw_col)
 
 
 def display_delta(row: pd.Series, horizon: int, admin_mode: bool = True) -> Any:
     raw_col = f"delta_{horizon}d"
     op_col = f"delta_operativo_{horizon}d"
-    if admin_mode:
-        return row.get(raw_col)
     return display_value(row, op_col, raw_col)
 
 

@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -6,6 +7,8 @@ from pathlib import Path
 import ee
 import geopandas as gpd
 import pandas as pd
+from dotenv import load_dotenv
+from shapely.geometry import shape
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -41,6 +44,13 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--input", default="data/parcelas/parcelas_ide.geojson")
+    parser.add_argument(
+        "--parcel-source",
+        choices=["geojson", "postgis"],
+        default="geojson",
+        help="Fuente de parcelas objetivo para --all-target-parcels.",
+    )
+    parser.add_argument("--database-url", default=None)
     parser.add_argument("--output-sample", default="data/parcelas/muestra_recalculada.geojson")
     parser.add_argument("--output", default=OUTPUT_TEMPORAL)
     parser.add_argument("--start-date", default="2023-01-01")
@@ -110,6 +120,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def database_url(cli_value: str | None) -> str:
+    load_dotenv()
+    value = cli_value or os.getenv("DATABASE_URL")
+    if not value:
+        raise RuntimeError("Configurar DATABASE_URL o pasar --database-url.")
+    return value
+
+
 def fechas_ventanas(start_date: str, end_date: str, step_days: int) -> list[date]:
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
@@ -130,6 +148,9 @@ def filtrar_vid_olivo(muestra: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 
 def preparar_todas_objetivo(args: argparse.Namespace) -> gpd.GeoDataFrame:
+    if args.parcel_source == "postgis":
+        return preparar_todas_objetivo_postgis(args)
+
     print("Cargando todas las parcelas objetivo vid/olivo...")
     gdf = gpd.read_file(args.input)
     gdf = gdf.to_crs("EPSG:4326")
@@ -149,6 +170,50 @@ def preparar_todas_objetivo(args: argparse.Namespace) -> gpd.GeoDataFrame:
     output_sample.parent.mkdir(parents=True, exist_ok=True)
     gdf.to_file(output_sample, driver="GeoJSON")
     print(f"Muestra completa guardada en {output_sample}: {gdf.shape}")
+    print("Distribucion:", gdf["cultivo"].value_counts().to_dict())
+    return gdf
+
+
+def preparar_todas_objetivo_postgis(args: argparse.Namespace) -> gpd.GeoDataFrame:
+    print("Cargando parcelas objetivo activas desde PostGIS...")
+    import psycopg
+    from psycopg.rows import dict_row
+
+    query = """
+        SELECT
+            parcela_id,
+            cultivo_oficial AS cultivo,
+            area_m2,
+            ST_AsGeoJSON(geom)::json AS geometry
+        FROM parcelas
+        WHERE activo = true
+          AND cultivo_oficial IN ('vid', 'olivo')
+          AND COALESCE(area_m2, 0) >= %s
+        ORDER BY parcela_id
+    """
+    with psycopg.connect(database_url(args.database_url), row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, [AREA_MINIMA_M2])
+            rows = cur.fetchall()
+
+    if not rows:
+        raise RuntimeError("PostGIS no devolvio parcelas objetivo activas vid/olivo.")
+
+    records = []
+    geometries = []
+    for row in rows:
+        item = dict(row)
+        geometries.append(shape(item.pop("geometry")))
+        item["id"] = str(item["parcela_id"])
+        records.append(item)
+
+    gdf = gpd.GeoDataFrame(records, geometry=geometries, crs="EPSG:4326")
+    gdf = gdf.sample(frac=1, random_state=RANDOM_STATE).reset_index(drop=True)
+
+    output_sample = Path(args.output_sample)
+    output_sample.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_file(output_sample, driver="GeoJSON")
+    print(f"Muestra PostGIS guardada en {output_sample}: {gdf.shape}")
     print("Distribucion:", gdf["cultivo"].value_counts().to_dict())
     return gdf
 

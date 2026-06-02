@@ -22,12 +22,12 @@ fuertemente en el rojo (fotosíntesis) y refleja en el infrarrojo
 cercano (estructura celular). Valores altos indican vegetación
 densa y activa.
 
-| Valor | Interpretación |
-|-------|---------------|
-| < 0.1 | Suelo desnudo, zonas urbanas |
+| Valor     | Interpretación                |
+|-----------|-------------------------------|
+| < 0.1     | Suelo desnudo, zonas urbanas  |
 | 0.1 – 0.3 | Vegetación escasa o estresada |
-| 0.3 – 0.5 | Vegetación moderada |
-| > 0.5 | Vegetación densa y vigorosa |
+| 0.3 – 0.5 | Vegetación moderada           |
+| > 0.5     | Vegetación densa y vigorosa   |
 
 **Rol en el sistema:**
 - Clasificación: diferencia zonas con vegetación de zonas sin ella.
@@ -49,12 +49,12 @@ sensible al agua líquida en las hojas: cuando hay déficit hídrico
 las células pierden turgencia y la reflectancia SWIR aumenta,
 haciendo caer el NDMI.
 
-| Valor | Interpretación |
-|-------|---------------|
-| > 0.2 | Sin estrés hídrico |
-| 0.0 – 0.2 | Estrés bajo |
-| -0.2 – 0.0 | Estrés medio |
-| < -0.2 | Estrés alto |
+| Valor      | Interpretación     |
+|------------|--------------------|
+| > 0.2      | Sin estrés hídrico |
+| 0.0 – 0.2  | Estrés bajo        |
+| -0.2 – 0.0 | Estrés medio       |
+| < -0.2     | Estrés alto        |
 
 **Rol en el sistema:**
 - Es el feature con mayor peso en la detección de estrés hídrico.
@@ -74,12 +74,12 @@ Originalmente diseñado para detectar cuerpos de agua, en
 agricultura indica la disponibilidad hídrica en la superficie
 del cultivo.
 
-| Valor | Interpretación |
-|-------|---------------|
-| > 0.3 | Agua libre o vegetación muy húmeda |
-| 0.0 – 0.3 | Vegetación con buen contenido hídrico |
-| -0.3 – 0.0 | Vegetación con estrés moderado |
-| < -0.3 | Suelo seco o vegetación muy estresada |
+| Valor      | Interpretación                        |
+|------------|---------------------------------------|
+| > 0.3      | Agua libre o vegetación muy húmeda    |
+| 0.0 – 0.3  | Vegetación con buen contenido hídrico |
+| -0.3 – 0.0 | Vegetación con estrés moderado        |
+| < -0.3     | Suelo seco o vegetación muy estresada |
 
 **Rol en el sistema:**
 - Complementa al NDMI en la detección de estrés hídrico.
@@ -96,12 +96,12 @@ mayor estrés hídrico. Es el índice más discriminativo para
 clasificar vid y olivo según los resultados del modelo
 (importancia: 27.2%).
 
-| Valor | Interpretación |
-|-------|---------------|
-| < 0.6 | Sin estrés |
-| 0.6 – 1.0 | Estrés bajo |
+| Valor | Interpretación   |
+|-----------|--------------|
+| < 0.6     | Sin estrés   |
+| 0.6 – 1.0 | Estrés bajo  |
 | 1.0 – 1.5 | Estrés medio |
-| > 1.5 | Estrés alto |
+| > 1.5     | Estrés alto  |
 
 **Rol en el sistema:**
 - Feature más importante del clasificador de cultivos (27.2%).
@@ -137,12 +137,12 @@ parcela y fecha:
 La importancia relativa de cada feature según el modelo entrenado:
 
 | Feature | Importancia |
-|---------|------------|
-| MSI | 27.2% |
-| NDVI | 19.5% |
-| NDMI | 18.4% |
-| NDWI | 17.8% |
-| SAVI | 17.1% |
+|---------|-------------|
+| MSI     | 27.2%       |
+| NDVI    | 19.5%       |
+| NDMI    | 18.4%       |
+| NDWI    | 17.8%       |
+| SAVI    | 17.1%       |
 
 El MSI es el más discriminativo porque captura la diferencia
 fenológica más marcada entre vid y olivo: en invierno la vid
