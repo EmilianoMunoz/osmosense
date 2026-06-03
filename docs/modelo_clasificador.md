@@ -1,5 +1,9 @@
 # Modelo Clasificador de Cultivos — Documentación Técnica
 
+> Estado: referencia técnica histórica. El producto operativo actual prioriza
+> el flujo hídrico vid/olivo y la visualización por roles; esta documentación
+> queda como respaldo del clasificador de cultivos.
+
 ## Objetivo
 Clasificar automáticamente parcelas agrícolas de San Rafael, Mendoza,
 en tres categorías: vid, olivo u otros, a partir de índices espectrales

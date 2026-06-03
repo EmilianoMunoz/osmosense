@@ -104,6 +104,12 @@ Valida contra la tabla `usuarios` de PostGIS y devuelve el rol operativo para
 abrir la vista correspondiente del dashboard. También devuelve un token firmado
 que debe enviarse en las rutas protegidas.
 
+Roles operativos actuales:
+
+- `admin`: administración completa.
+- `regional`: vista agregada por UM/zona.
+- `productor`: parcelas asociadas al productor/campo.
+
 Respuesta:
 
 ```json
@@ -232,6 +238,41 @@ CSV de `backend/data/clientes`.
 
 Este endpoint conserva parcelas asociadas aunque no tengan ranking latest,
 marcándolas como `sin_ranking_latest`.
+
+## Admin usuarios
+
+Requiere rol `admin`.
+
+```http
+GET /admin/usuarios
+GET /admin/usuarios?limit=100&activo=true
+```
+
+Devuelve usuarios sin `password_hash`.
+
+```http
+POST /admin/usuarios
+```
+
+Payload:
+
+```json
+{
+  "email": "finca",
+  "nombre": "Finca Demo Norte",
+  "rol": "productor",
+  "cliente_id": 1,
+  "password": "cliente123",
+  "activo": true
+}
+```
+
+```http
+PUT /admin/usuarios/1
+```
+
+Permite actualizar `email`, `nombre`, `rol`, `cliente_id`, `activo` y resetear
+contraseña con `password`.
 
 ## Admin clientes
 

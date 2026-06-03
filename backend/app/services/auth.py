@@ -15,6 +15,10 @@ HASH_ALGORITHM = "pbkdf2_sha256"
 HASH_ITERATIONS = 260_000
 TOKEN_ALGORITHM = "hmac_sha256"
 TOKEN_TTL_SECONDS = 8 * 60 * 60
+ROLE_ALIASES = {
+    "cliente_particular": "productor",
+    "cliente_regional": "regional",
+}
 
 
 def database_url() -> str | None:
@@ -25,6 +29,10 @@ def database_url() -> str | None:
 def auth_secret() -> str:
     load_dotenv()
     return os.getenv("AUTH_SECRET") or "estres-dev-auth-secret"
+
+
+def normalize_role(rol: str) -> str:
+    return ROLE_ALIASES.get(rol, rol)
 
 
 def _b64url_encode(data: bytes) -> str:
@@ -79,33 +87,36 @@ def verify_password(password: str, password_hash: str | None) -> bool:
 
 
 def _role_to_view(rol: str) -> str:
+    rol = normalize_role(rol)
     if rol == "admin":
         return "Admin"
-    if rol == "cliente_regional":
+    if rol == "regional":
         return "Regional"
-    return "Cliente"
+    return "Productor"
 
 
 def _clean_user(row: dict[str, Any]) -> dict[str, Any]:
+    rol = normalize_role(row["rol"])
     return {
         "usuario_id": int(row["usuario_id"]),
         "email": row["email"],
         "nombre": row.get("nombre"),
-        "rol": row["rol"],
+        "rol": rol,
         "cliente_id": int(row["cliente_id"]) if row.get("cliente_id") is not None else None,
-        "view_mode": _role_to_view(row["rol"]),
+        "view_mode": _role_to_view(rol),
     }
 
 
 def create_access_token(user: dict[str, Any]) -> str:
     now = int(time.time())
+    rol = normalize_role(user["rol"])
     payload = {
         "sub": str(user["usuario_id"]),
         "email": user["email"],
         "nombre": user.get("nombre"),
-        "rol": user["rol"],
+        "rol": rol,
         "cliente_id": user.get("cliente_id"),
-        "view_mode": user["view_mode"],
+        "view_mode": user.get("view_mode") or _role_to_view(rol),
         "iat": now,
         "exp": now + int(os.getenv("AUTH_TOKEN_TTL_SECONDS", TOKEN_TTL_SECONDS)),
     }
@@ -139,15 +150,16 @@ def verify_access_token(token: str) -> dict[str, Any]:
     if int(payload.get("exp", 0)) < int(time.time()):
         raise ValueError("Token expirado.")
 
+    rol = normalize_role(payload["rol"])
     return {
         "usuario_id": int(payload["sub"]),
         "email": payload["email"],
         "nombre": payload.get("nombre"),
-        "rol": payload["rol"],
+        "rol": rol,
         "cliente_id": (
             int(payload["cliente_id"]) if payload.get("cliente_id") is not None else None
         ),
-        "view_mode": payload["view_mode"],
+        "view_mode": payload.get("view_mode") or _role_to_view(rol),
     }
 
 

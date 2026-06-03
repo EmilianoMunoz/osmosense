@@ -155,6 +155,14 @@ def run_api_checks(api_url: str, expected_source: str, timeout: float) -> None:
     assert_items(admin_clientes, "/admin/clientes")
     print(f"OK /admin/clientes count={admin_clientes.get('count')}")
 
+    if expected_source != "csv":
+        admin_usuarios = get_json(api_url, "/admin/usuarios?limit=5", timeout, admin_token)
+        assert_source(admin_usuarios, "postgis" if expected_source == "postgis" else "any", "/admin/usuarios")
+        usuario_items = assert_items(admin_usuarios, "/admin/usuarios")
+        check("password_hash" not in usuario_items[0], "/admin/usuarios expone password_hash")
+        check("rol" in usuario_items[0], "/admin/usuarios no incluye rol")
+        print(f"OK /admin/usuarios count={admin_usuarios.get('count')}")
+
     admin_parcelas = get_json(api_url, "/admin/parcelas?limit=1", timeout, admin_token)
     assert_source(admin_parcelas, expected_source, "/admin/parcelas")
     parcela_items = assert_items(admin_parcelas, "/admin/parcelas")

@@ -6,11 +6,14 @@ import streamlit as st
 from frontend.auth import is_authenticated, render_auth_sidebar, render_login
 from frontend.data import (
     activar_parcela_disponible,
+    create_usuario,
     features_to_frame,
     filtered_geojson,
     load_admin_parcelas_disponibles,
+    load_admin_usuarios,
     load_clientes,
     load_geojson,
+    update_usuario,
 )
 from frontend.logic import add_dynamic_priority, cliente_changed, priority_options, review_priority
 from frontend.map import bbox_center_zoom, render_map
@@ -29,16 +32,16 @@ from frontend.views.regional import render_regional_view
 
 def select_view_mode() -> tuple[str, bool, bool]:
     st.sidebar.header("Acceso")
-    current_view = st.session_state.get("view_mode", "Cliente")
+    current_view = st.session_state.get("view_mode", "Productor")
     rol = st.session_state.get("auth_rol")
     if rol == "admin":
-        options = ["Admin", "Regional", "Cliente"]
-    elif rol == "cliente_regional":
+        options = ["Admin", "Regional", "Productor"]
+    elif rol == "regional":
         options = ["Regional"]
-    elif rol == "cliente_particular":
-        options = ["Cliente"]
+    elif rol == "productor":
+        options = ["Productor"]
     else:
-        options = ["Cliente", "Regional", "Admin"]
+        options = ["Productor", "Regional", "Admin"]
     view_mode = st.sidebar.radio(
         "Vista",
         options,
@@ -54,17 +57,17 @@ def select_cliente(admin_mode: bool) -> tuple[int | None, str | None]:
         return None, None
 
     auth_cliente_id = st.session_state.get("auth_cliente_id")
-    if st.session_state.get("auth_rol") == "cliente_particular" and auth_cliente_id is not None:
+    if st.session_state.get("auth_rol") == "productor" and auth_cliente_id is not None:
         cliente_id = int(auth_cliente_id)
-        st.sidebar.caption(f"Cliente asignado: {cliente_id}")
-        return cliente_id, f"Cliente {cliente_id}"
+        st.sidebar.caption(f"Productor asignado: {cliente_id}")
+        return cliente_id, f"Productor {cliente_id}"
 
     clientes_data = load_clientes()
     clientes_items = clientes_data.get("items", [])
     if not clientes_items:
         st.info(
-            "No hay clientes cargados. Crear backend/data/clientes/clientes.csv y "
-            "backend/data/clientes/cliente_parcela.csv para habilitar la vista cliente."
+            "No hay productores cargados. Crear backend/data/clientes/clientes.csv y "
+            "backend/data/clientes/cliente_parcela.csv para habilitar la vista productor."
         )
         st.stop()
 
@@ -82,14 +85,14 @@ def select_cliente(admin_mode: bool) -> tuple[int | None, str | None]:
         else 0
     )
     selected_cliente_id = st.sidebar.selectbox(
-        "Cliente",
+        "Productor",
         cliente_ids,
         index=cliente_index,
         format_func=lambda cid: labels[int(cid)],
     )
     cliente_changed(int(selected_cliente_id))
     selected_cliente_name = labels[int(selected_cliente_id)]
-    st.caption(f"Vista cliente · {selected_cliente_name}")
+    st.caption(f"Vista productor · {selected_cliente_name}")
     return int(selected_cliente_id), selected_cliente_name
 
 
@@ -413,7 +416,7 @@ def render_available_parcels_tab() -> None:
         with st.form("activar_parcela_disponible"):
             cultivo_destino = st.radio("Nuevo cultivo operativo", ["vid", "olivo"], horizontal=True)
             cliente_id = st.selectbox(
-                "Asignar cliente",
+                "Asignar productor",
                 cliente_options,
                 format_func=lambda value: cliente_labels.get(value, str(value)),
             )
@@ -433,6 +436,153 @@ def render_available_parcels_tab() -> None:
             else:
                 st.success("Parcela activada. Entrará al universo objetivo PostGIS.")
                 st.session_state.pop("selected_disponible_id", None)
+                st.rerun()
+
+
+def _productor_options() -> tuple[list[int | None], dict[int | None, str]]:
+    clientes_data = load_clientes()
+    clientes_items = clientes_data.get("items", [])
+    options: list[int | None] = [None]
+    labels: dict[int | None, str] = {None: "Sin asignar"}
+    for cliente in clientes_items:
+        cliente_id = int(cliente["cliente_id"])
+        options.append(cliente_id)
+        labels[cliente_id] = (
+            f"{cliente['nombre']} · {cliente['tipo']} · "
+            f"{int(cliente.get('parcelas_asignadas', 0))} parcelas"
+        )
+    return options, labels
+
+
+def render_users_tab() -> None:
+    st.subheader("Usuarios")
+    st.caption("Alta y mantenimiento de accesos. Roles operativos: admin, regional y productor.")
+
+    data = load_admin_usuarios(limit=5000)
+    users = pd.DataFrame(data.get("items", []))
+    st.caption(f"Fuente: {data.get('source', 'desconocida')} · {len(users)} usuarios")
+
+    if not users.empty:
+        visible_cols = [
+            "usuario_id",
+            "email",
+            "nombre",
+            "rol",
+            "productor_nombre",
+            "cliente_id",
+            "activo",
+            "last_login_at",
+        ]
+        visible_cols = [col for col in visible_cols if col in users.columns]
+        st.dataframe(users[visible_cols], hide_index=True, width="stretch")
+    else:
+        st.info("No hay usuarios cargados o la API no está disponible.")
+
+    productor_options, productor_labels = _productor_options()
+    col_create, col_edit = st.columns(2)
+
+    with col_create:
+        st.subheader("Nuevo usuario")
+        with st.form("create_usuario_form"):
+            email = st.text_input("Usuario/email", key="new_user_email")
+            nombre = st.text_input("Nombre", key="new_user_nombre")
+            rol = st.selectbox("Rol", ["productor", "regional", "admin"], key="new_user_rol")
+            cliente_id = None
+            if rol == "productor":
+                cliente_id = st.selectbox(
+                    "Productor/campo asociado",
+                    productor_options,
+                    format_func=lambda value: productor_labels.get(value, str(value)),
+                    key="new_user_cliente_id",
+                )
+            password = st.text_input("Contraseña inicial", type="password", key="new_user_password")
+            activo = st.checkbox("Activo", value=True, key="new_user_activo")
+            submitted = st.form_submit_button("Crear usuario")
+
+        if submitted:
+            try:
+                payload = {
+                    "email": email,
+                    "nombre": nombre or None,
+                    "rol": rol,
+                    "cliente_id": cliente_id,
+                    "password": password,
+                    "activo": activo,
+                }
+                create_usuario(payload)
+            except Exception as exc:
+                st.error(f"No se pudo crear el usuario: {exc}")
+            else:
+                st.success("Usuario creado.")
+                st.rerun()
+
+    with col_edit:
+        st.subheader("Editar usuario")
+        if users.empty:
+            st.info("No hay usuarios para editar.")
+            return
+
+        user_ids = [int(value) for value in users["usuario_id"].dropna().tolist()]
+        selected_user_id = st.selectbox(
+            "Usuario",
+            user_ids,
+            format_func=lambda uid: str(
+                users.loc[users["usuario_id"].astype(int) == int(uid), "email"].iloc[0]
+            ),
+            key="edit_user_id",
+        )
+        selected = users[users["usuario_id"].astype(int) == int(selected_user_id)].iloc[0]
+        current_rol = selected.get("rol") if selected.get("rol") in ["productor", "regional", "admin"] else "productor"
+        with st.form("edit_usuario_form"):
+            email = st.text_input("Usuario/email", value=str(selected.get("email") or ""), key="edit_user_email")
+            nombre = st.text_input("Nombre", value=str(selected.get("nombre") or ""), key="edit_user_nombre")
+            rol = st.selectbox(
+                "Rol",
+                ["productor", "regional", "admin"],
+                index=["productor", "regional", "admin"].index(current_rol),
+                key="edit_user_rol",
+            )
+            cliente_id = None
+            if rol == "productor":
+                current_cliente = selected.get("cliente_id")
+                current_cliente = int(current_cliente) if pd.notna(current_cliente) else None
+                index = (
+                    productor_options.index(current_cliente)
+                    if current_cliente in productor_options
+                    else 0
+                )
+                cliente_id = st.selectbox(
+                    "Productor/campo asociado",
+                    productor_options,
+                    index=index,
+                    format_func=lambda value: productor_labels.get(value, str(value)),
+                    key="edit_user_cliente_id",
+                )
+            password = st.text_input(
+                "Nueva contraseña",
+                type="password",
+                help="Dejar vacío para conservar la actual.",
+                key="edit_user_password",
+            )
+            activo = st.checkbox("Activo", value=bool(selected.get("activo", True)), key="edit_user_activo")
+            submitted = st.form_submit_button("Guardar cambios")
+
+        if submitted:
+            try:
+                payload = {
+                    "email": email,
+                    "nombre": nombre or None,
+                    "rol": rol,
+                    "cliente_id": cliente_id,
+                    "activo": activo,
+                }
+                if password:
+                    payload["password"] = password
+                update_usuario(int(selected_user_id), payload)
+            except Exception as exc:
+                st.error(f"No se pudo actualizar el usuario: {exc}")
+            else:
+                st.success("Usuario actualizado.")
                 st.rerun()
 
 
@@ -472,8 +622,8 @@ def render_dashboard() -> None:
     filtered_data = filtered_geojson(data, set(filtered["parcela_id"].astype(int)))
 
     if admin_mode:
-        tab_estado, tab_mapa, tab_disponibles, tab_revision, tab_cobertura, tab_datos = st.tabs(
-            ["Estado", "Mapa operativo", "Disponibles", "Revisión técnica", "Cobertura", "Datos"]
+        tab_estado, tab_usuarios, tab_mapa, tab_disponibles, tab_revision, tab_cobertura, tab_datos = st.tabs(
+            ["Estado", "Usuarios", "Mapa operativo", "Disponibles", "Revisión técnica", "Cobertura", "Datos"]
         )
     else:
         render_client_metrics(filtered)
@@ -483,6 +633,8 @@ def render_dashboard() -> None:
     if admin_mode:
         with tab_estado:
             render_admin_status_tab(df, filtered)
+        with tab_usuarios:
+            render_users_tab()
 
     with tab_mapa:
         render_map_tab(data, filtered, filtered_data, color_by, admin_mode, selected_cliente_id)

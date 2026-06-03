@@ -76,6 +76,17 @@ earthengine authenticate
 
 ## Uso
 
+Referencias rápidas:
+
+```text
+docs/comandos.md
+docs/estructura_proyecto.md
+docs/FUTURE.md
+backend/README.md
+frontend/README.md
+backend/scripts/README.md
+```
+
 ### Recalcular dataset temporal Sentinel-2
 ```bash
 venv/bin/python backend/scripts/pipeline/generar_dataset_temporal_hidrico.py --reuse-sample --resume-from-max-date --output backend/data/dataset_temporal_hidrico.csv --start-date 2023-01-01 --end-date 2024-12-31 --step-days 5 --window-days 5 --chunk-size 500
@@ -308,6 +319,9 @@ PUT /admin/clientes/{cliente_id}
 GET /admin/clientes/{cliente_id}/parcelas
 POST /admin/clientes/{cliente_id}/parcelas
 DELETE /admin/clientes/{cliente_id}/parcelas/{parcela_id}
+GET /admin/usuarios
+POST /admin/usuarios
+PUT /admin/usuarios/{usuario_id}
 GET /regional/um/latest
 GET /regional/um/latest/geojson
 GET /regional/um/{um_id}/parcelas/latest/geojson

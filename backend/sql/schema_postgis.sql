@@ -170,7 +170,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     usuario_id bigserial PRIMARY KEY,
     email text NOT NULL UNIQUE,
     nombre text,
-    rol text NOT NULL CHECK (rol IN ('admin', 'cliente_particular', 'cliente_regional')),
+    rol text NOT NULL CHECK (rol IN ('admin', 'regional', 'productor')),
     cliente_id bigint REFERENCES clientes(cliente_id),
     password_hash text,
     activo boolean NOT NULL DEFAULT true,
@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     created_at timestamptz DEFAULT now(),
     updated_at timestamptz DEFAULT now(),
     CONSTRAINT usuarios_cliente_requerido_para_cliente CHECK (
-        rol IN ('admin', 'cliente_regional') OR cliente_id IS NOT NULL
+        rol IN ('admin', 'regional') OR cliente_id IS NOT NULL
     )
 );
 
@@ -189,11 +189,27 @@ ALTER TABLE usuarios
     ALTER COLUMN password_hash DROP NOT NULL;
 
 ALTER TABLE usuarios
+    DROP CONSTRAINT IF EXISTS usuarios_rol_check;
+
+ALTER TABLE usuarios
     DROP CONSTRAINT IF EXISTS usuarios_cliente_requerido_para_cliente;
+
+UPDATE usuarios
+SET rol = CASE
+    WHEN rol = 'cliente_particular' THEN 'productor'
+    WHEN rol = 'cliente_regional' THEN 'regional'
+    ELSE rol
+END
+WHERE rol IN ('cliente_particular', 'cliente_regional');
+
+ALTER TABLE usuarios
+    ADD CONSTRAINT usuarios_rol_check CHECK (
+        rol IN ('admin', 'regional', 'productor')
+    );
 
 ALTER TABLE usuarios
     ADD CONSTRAINT usuarios_cliente_requerido_para_cliente CHECK (
-        rol IN ('admin', 'cliente_regional') OR cliente_id IS NOT NULL
+        rol IN ('admin', 'regional') OR cliente_id IS NOT NULL
     );
 
 CREATE TABLE IF NOT EXISTS cliente_parcela (

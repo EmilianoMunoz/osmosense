@@ -41,15 +41,15 @@ Usuarios demo:
 | Usuario    | Contraseña    | Vista         |
 |------------|---------------|---------------|
 | `admin`    | `admin123`    | Admin         |
-| `finca`    | `cliente123`  | Cliente vid   |
-| `olivar`   | `cliente123`  | Cliente olivo |
+| `finca`    | `cliente123`  | Productor vid |
+| `olivar`   | `cliente123`  | Productor olivo |
 | `regional` | `regional123` | Regional      |
 
 La pantalla conserva accesos rápidos para desarrollo:
 
 ```text
-Cliente vid
-Cliente olivo
+Productor vid
+Productor olivo
 Admin
 Regional
 ```

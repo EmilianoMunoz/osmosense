@@ -1,5 +1,9 @@
 # Reconstrucción del dataset desde IDEMendoza
 
+> Estado: histórico/metodológico. La estructura actual del backend está en
+> `backend/`; este documento conserva el razonamiento de reconstrucción de datos
+> y no debe usarse como guía de comandos operativos sin revisar rutas.
+
 ## Objetivo
 
 Reconstruir los datasets de clasificación partiendo desde

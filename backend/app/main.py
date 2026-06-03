@@ -28,6 +28,7 @@ from backend.app.services.rankings import (
     regional_um_latest_geojson,
     regional_um_parcelas_latest_geojson,
 )
+from backend.app.services.users import admin_create_usuario, admin_update_usuario, admin_usuarios
 
 
 class ClienteCreate(BaseModel):
@@ -96,6 +97,28 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1)
 
 
+class UsuarioCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=1)
+    nombre: str | None = None
+    rol: str = Field(pattern="^(admin|regional|productor)$")
+    cliente_id: int | None = Field(default=None, ge=1)
+    password: str = Field(min_length=6)
+    activo: bool = True
+
+
+class UsuarioUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str | None = Field(default=None, min_length=1)
+    nombre: str | None = None
+    rol: str | None = Field(default=None, pattern="^(admin|regional|productor)$")
+    cliente_id: int | None = Field(default=None, ge=1)
+    password: str | None = Field(default=None, min_length=6)
+    activo: bool | None = None
+
+
 def current_user(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Token requerido.")
@@ -121,9 +144,9 @@ def require_cliente_or_admin(
 ) -> dict[str, Any]:
     if user["rol"] == "admin":
         return user
-    if user["rol"] == "cliente_particular" and user.get("cliente_id") == cliente_id:
+    if user["rol"] == "productor" and user.get("cliente_id") == cliente_id:
         return user
-    raise HTTPException(status_code=403, detail="Cliente no autorizado.")
+    raise HTTPException(status_code=403, detail="Productor no autorizado.")
 
 
 app = FastAPI(
@@ -305,6 +328,54 @@ def get_admin_clientes(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@app.get("/admin/usuarios")
+def get_admin_usuarios(
+    limit: int | None = Query(default=None, ge=1, le=5000),
+    activo: bool | None = Query(default=None),
+    _user: dict[str, Any] = Depends(require_roles("admin")),
+) -> dict:
+    try:
+        return admin_usuarios(limit=limit, activo=activo)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/admin/usuarios", status_code=201)
+def post_admin_usuario(
+    payload: UsuarioCreate,
+    _user: dict[str, Any] = Depends(require_roles("admin")),
+) -> dict:
+    try:
+        return admin_create_usuario(payload.model_dump())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.put("/admin/usuarios/{usuario_id}")
+def put_admin_usuario(
+    usuario_id: int,
+    payload: UsuarioUpdate,
+    _user: dict[str, Any] = Depends(require_roles("admin")),
+) -> dict:
+    try:
+        return admin_update_usuario(
+            usuario_id,
+            payload.model_dump(exclude_unset=True),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.post("/admin/clientes", status_code=201)
 def post_admin_cliente(
     payload: ClienteCreate,
@@ -418,7 +489,7 @@ def get_ranking_by_fecha(
 @app.get("/regional/um/latest")
 def get_regional_um_latest(
     limit: int | None = Query(default=None, ge=1, le=5000),
-    _user: dict[str, Any] = Depends(require_roles("admin", "cliente_regional")),
+    _user: dict[str, Any] = Depends(require_roles("admin", "regional")),
 ) -> dict:
     try:
         return regional_um_latest(limit=limit)
@@ -428,7 +499,7 @@ def get_regional_um_latest(
 
 @app.get("/regional/um/latest/geojson")
 def get_regional_um_latest_geojson(
-    _user: dict[str, Any] = Depends(require_roles("admin", "cliente_regional")),
+    _user: dict[str, Any] = Depends(require_roles("admin", "regional")),
 ) -> dict:
     try:
         return regional_um_latest_geojson()
@@ -439,7 +510,7 @@ def get_regional_um_latest_geojson(
 @app.get("/regional/um/{um_id}/parcelas/latest/geojson")
 def get_regional_um_parcelas_latest_geojson(
     um_id: int,
-    _user: dict[str, Any] = Depends(require_roles("admin", "cliente_regional")),
+    _user: dict[str, Any] = Depends(require_roles("admin", "regional")),
 ) -> dict:
     try:
         return regional_um_parcelas_latest_geojson(um_id)

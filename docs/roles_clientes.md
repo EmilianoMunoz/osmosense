@@ -1,12 +1,16 @@
 # Roles y clientes
 
+> Estado: referencia histórica. El flujo actual de login y permisos está en
+> `docs/postgis.md` y en `backend.app.main`. Este documento conserva el diseño
+> conceptual original de roles.
+
 ## Objetivo
 
 Separar el producto en vistas con distinto alcance de datos:
 
 - `admin`: ve todo el sistema, auditorías y métricas técnicas.
-- `cliente_particular`: ve únicamente sus parcelas asociadas.
-- `cliente_regional`: verá parcelas agregadas por zona o región.
+- `productor`: ve únicamente sus parcelas asociadas.
+- `regional`: verá parcelas agregadas por zona o región.
 
 El filtrado de parcelas debe hacerse en backend/PostGIS. El dashboard no debe
 recibir parcelas que el usuario no puede ver.

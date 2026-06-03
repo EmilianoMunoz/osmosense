@@ -1115,21 +1115,20 @@ prioridad = sin ranking
 
 Esto permite visualización completa del universo oficial sin inventar scores.
 
-### Roles Y Clientes
+### Roles Y Productores
 
 Decisión:
 
 ```text
-El dashboard se separa en vistas Admin, Cliente y Regional.
-Las vistas cliente deben filtrar parcelas desde backend/PostGIS.
+El dashboard se separa en vistas Admin, Productor y Regional.
+Las vistas productor deben filtrar parcelas desde backend/PostGIS.
 ```
 
 Roles previstos:
 
 ```text
 admin
-cliente_particular
-cliente_regional
+productor
 regional
 ```
 
@@ -1249,17 +1248,17 @@ Decisiones vigentes:
 - panel de predicción solo para parcelas rankeadas;
 - métricas visibles de evaluadas y sin ranking.
 - login local de desarrollo antes de cargar datos pesados;
-- selector de vista `Admin` / `Cliente` / `Regional` dentro de la sesión;
-- vista cliente filtrada por backend usando relación `cliente_parcela`;
-- vista cliente sin pestaña de revisión técnica.
+- selector de vista `Admin` / `Productor` / `Regional` dentro de la sesión;
+- vista productor filtrada por backend usando relación `cliente_parcela`;
+- vista productor sin pestaña de revisión técnica.
 - vista regional para validar zonificación DGI recortada a San Rafael;
-- la primera pantalla mantiene accesos rápidos `Cliente vid`, `Cliente olivo`,
+- la primera pantalla mantiene accesos rápidos `Productor vid`, `Productor olivo`,
   `Admin` y `Regional` para desarrollo;
-- hay dos clientes demo locales en `data/clientes/`, ambos con parcelas vecinas
+- hay dos productores demo locales en `data/clientes/`, ambos con parcelas vecinas
   para simular campos reales.
-- la vista cliente no recomienda riego; muestra detección/proyección de estrés
+- la vista productor no recomienda riego; muestra detección/proyección de estrés
   para que el productor tome la decisión con su propio criterio.
-- al cambiar de cliente se limpia la parcela seleccionada y el mapa se centra
+- al cambiar de productor se limpia la parcela seleccionada y el mapa se centra
   en el campo visible.
 
 Usuarios demo:
@@ -1267,8 +1266,8 @@ Usuarios demo:
 | Usuario  | Contraseña  | Vista         |
 |----------|-------------|---------------|
 | admin    | admin123    | Admin         |
-| finca    | cliente123  | Cliente vid   |
-| olivar   | cliente123  | Cliente olivo |
+| finca    | cliente123  | Productor vid |
+| olivar   | cliente123  | Productor olivo |
 | regional | regional123 | Regional DGI  |
 
 Refactor iniciado:
@@ -1915,6 +1914,34 @@ Decisiones:
 - `scipy` se agregó porque se usa para `spearmanr`;
 - `psycopg[binary]` queda declarado para PostGIS;
 - el fallback local puede correr sin PostGIS.
+
+## Roles Y Usuarios
+
+Roles operativos vigentes:
+
+```text
+admin
+regional
+productor
+```
+
+Decisiones:
+
+- se reemplazó la nomenclatura de roles `cliente_particular` y
+  `cliente_regional` por `productor` y `regional`;
+- la tabla `clientes` y el campo `cliente_id` se mantienen por ahora como
+  estructura interna de asociación productor/campo-parcela;
+- el schema PostGIS migra roles antiguos a los nuevos al reaplicarse;
+- el dashboard Admin incorpora una pestaña `Usuarios`;
+- el API expone `GET/POST/PUT /admin/usuarios`;
+- los usuarios demo quedan como `admin`, `finca`, `olivar` y `regional`.
+
+Verificación local:
+
+```text
+63 tests passed
+usuarios demo PostGIS: admin, productor, productor, regional
+```
 
 ## Decisiones Descartadas O Resumidas
 

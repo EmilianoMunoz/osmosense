@@ -5,7 +5,7 @@ El proyecto ya no depende de FAO/GAUL para obtener la geometría de San Rafael.
 La fuente preferida es un GeoJSON local:
 
 ```text
-data/limites/san_rafael.geojson
+backend/data/limites/san_rafael.geojson
 ```
 
 Si ese archivo existe, el código lo usa para:

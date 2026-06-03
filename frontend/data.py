@@ -93,6 +93,67 @@ def fetch_admin_parcelas_disponibles_from_api(
         return None
 
 
+@st.cache_data(show_spinner=False)
+def fetch_admin_usuarios_from_api(
+    base_url: str,
+    token: str | None,
+    limit: int | None = None,
+    activo: bool | None = None,
+) -> dict[str, Any] | None:
+    try:
+        params: dict[str, Any] = {}
+        if limit:
+            params["limit"] = limit
+        if activo is not None:
+            params["activo"] = activo
+        response = requests.get(
+            f"{base_url}/admin/usuarios",
+            params=params or None,
+            headers=auth_headers(token),
+            timeout=8,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException:
+        return None
+
+
+def load_admin_usuarios(limit: int | None = 5000, activo: bool | None = None) -> dict[str, Any]:
+    data = fetch_admin_usuarios_from_api(
+        api_base_url(),
+        auth_token(),
+        limit=limit,
+        activo=activo,
+    )
+    if data is None:
+        return {"source": "api_unavailable", "count": 0, "items": []}
+    return data
+
+
+def create_usuario(payload: dict[str, Any]) -> dict[str, Any]:
+    response = requests.post(
+        f"{api_base_url()}/admin/usuarios",
+        json=payload,
+        headers=auth_headers(),
+        timeout=10,
+    )
+    response.raise_for_status()
+    fetch_admin_usuarios_from_api.clear()
+    return response.json()
+
+
+def update_usuario(usuario_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    response = requests.put(
+        f"{api_base_url()}/admin/usuarios/{int(usuario_id)}",
+        json=payload,
+        headers=auth_headers(),
+        timeout=10,
+    )
+    response.raise_for_status()
+    fetch_admin_usuarios_from_api.clear()
+    return response.json()
+
+
 def activar_parcela_disponible(
     parcela_id: int,
     cultivo_oficial: str,

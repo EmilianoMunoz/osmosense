@@ -204,8 +204,8 @@ Roles soportados:
 | Rol                   | Vista dashboard | Requiere cliente |
 |-----------------------|-----------------|------------------|
 | `admin`               | Admin           | No               |
-| `cliente_particular`  | Cliente         | Sí               |
-| `cliente_regional`    | Regional        | No               |
+| `productor`           | Productor       | Sí               |
+| `regional`            | Regional        | No               |
 
 Cargar o actualizar usuarios demo:
 
@@ -218,9 +218,9 @@ Usuarios cargados:
 | Login      | Contraseña    | Rol                  |
 |------------|---------------|----------------------|
 | `admin`    | `admin123`    | `admin`              |
-| `finca`    | `cliente123`  | `cliente_particular` |
-| `olivar`   | `cliente123`  | `cliente_particular` |
-| `regional` | `regional123` | `cliente_regional`   |
+| `finca`    | `cliente123`  | `productor`          |
+| `olivar`   | `cliente123`  | `productor`          |
+| `regional` | `regional123` | `regional`           |
 
 El endpoint de login es:
 
@@ -237,8 +237,8 @@ protegidas por rol:
 | `/rankings/latest*`           | `admin`                                  |
 | `/rankings/{fecha}`           | `admin`                                  |
 | `/clientes`                   | `admin`                                  |
-| `/clientes/{id}/rankings/*`   | `admin` o cliente particular propietario |
-| `/regional/*`                 | `admin` o `cliente_regional`             |
+| `/clientes/{id}/rankings/*`   | `admin` o productor propietario          |
+| `/regional/*`                 | `admin` o `regional`                     |
 
 El dashboard Streamlit guarda el token en sesión y lo envía como:
 

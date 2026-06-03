@@ -1,5 +1,9 @@
 # Inventario de código
 
+> Estado: histórico. Este inventario fue útil antes de reorganizar el proyecto
+> en `backend/`. Para comandos y estructura actuales usar
+> `docs/estructura_proyecto.md`, `docs/comandos.md` y `backend/scripts/README.md`.
+
 Este inventario define qué archivos pertenecen al flujo operativo actual y
 cuáles quedan como legacy o experimentales. No agrega funcionalidad: solo reduce
 ambigüedad para mantenimiento, commits y defensa técnica del proyecto.

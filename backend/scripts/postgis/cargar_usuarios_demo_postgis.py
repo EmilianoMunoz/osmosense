@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.app.services.auth import hash_password
 
@@ -22,21 +28,21 @@ DEMO_USERS = [
     {
         "email": "finca",
         "nombre": "Finca Demo Norte",
-        "rol": "cliente_particular",
+        "rol": "productor",
         "cliente_id": 1,
         "password": "cliente123",
     },
     {
         "email": "olivar",
         "nombre": "Olivar Demo Este",
-        "rol": "cliente_particular",
+        "rol": "productor",
         "cliente_id": 2,
         "password": "cliente123",
     },
     {
         "email": "regional",
         "nombre": "Regional DGI",
-        "rol": "cliente_regional",
+        "rol": "regional",
         "cliente_id": None,
         "password": "regional123",
     },

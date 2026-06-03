@@ -14,6 +14,7 @@ class DemoUser:
     password: str
     label: str
     view_mode: str
+    rol: str
     cliente_id: int | None = None
 
 
@@ -23,19 +24,22 @@ DEMO_USERS = {
         password="admin123",
         label="Administrador",
         view_mode="Admin",
+        rol="admin",
     ),
     "finca": DemoUser(
         username="finca",
         password="cliente123",
         label="Finca Demo Norte",
-        view_mode="Cliente",
+        view_mode="Productor",
+        rol="productor",
         cliente_id=1,
     ),
     "olivar": DemoUser(
         username="olivar",
         password="cliente123",
         label="Olivar Demo Este",
-        view_mode="Cliente",
+        view_mode="Productor",
+        rol="productor",
         cliente_id=2,
     ),
     "regional": DemoUser(
@@ -43,6 +47,7 @@ DEMO_USERS = {
         password="regional123",
         label="Regional DGI",
         view_mode="Regional",
+        rol="regional",
     ),
 }
 
@@ -62,7 +67,7 @@ def login_as(user: DemoUser) -> None:
     st.session_state["auth_label"] = user.label
     st.session_state["view_mode"] = user.view_mode
     st.session_state["auth_cliente_id"] = user.cliente_id
-    st.session_state["auth_rol"] = "demo"
+    st.session_state["auth_rol"] = user.rol
     st.session_state["auth_source"] = "demo"
     st.session_state.pop("auth_token", None)
     st.session_state.pop("selected_parcela_id", None)
@@ -94,7 +99,7 @@ def login_from_api(username: str, password: str) -> tuple[bool, str | None, bool
     st.session_state["authenticated"] = True
     st.session_state["auth_user"] = user.get("email", login)
     st.session_state["auth_label"] = user.get("nombre") or user.get("email") or login
-    st.session_state["view_mode"] = user.get("view_mode", "Cliente")
+    st.session_state["view_mode"] = user.get("view_mode", "Productor")
     st.session_state["auth_cliente_id"] = user.get("cliente_id")
     st.session_state["auth_rol"] = user.get("rol")
     st.session_state["auth_source"] = payload.get("source", "postgis")
@@ -237,7 +242,7 @@ def render_login() -> None:
             c1, c2 = st.columns(2)
 
             with c1:
-                if st.button("Cliente vid", width="stretch"):
+                if st.button("Productor vid", width="stretch"):
                     login_as(DEMO_USERS["finca"])
                     st.rerun()
 
@@ -246,7 +251,7 @@ def render_login() -> None:
                     st.rerun()
 
             with c2:
-                if st.button("Cliente olivo", width="stretch"):
+                if st.button("Productor olivo", width="stretch"):
                     login_as(DEMO_USERS["olivar"])
                     st.rerun()
 
@@ -267,10 +272,19 @@ def render_login() -> None:
 def render_auth_sidebar() -> None:
     label = st.session_state.get("auth_label", "Usuario")
     source = st.session_state.get("auth_source")
+    role = st.session_state.get("auth_rol")
     st.sidebar.header("Sesión")
-    st.sidebar.caption(f"Conectado como: {label}")
-    if source:
-        st.sidebar.caption(f"Origen sesión: {source}")
+    if source == "postgis":
+        st.sidebar.success("Sesión PostGIS")
+    elif source == "demo":
+        st.sidebar.warning("Sesión demo")
+    else:
+        st.sidebar.info("Sesión local")
+    st.sidebar.caption(f"Usuario: {label}")
+    if role:
+        st.sidebar.caption(f"Rol: {role}")
+    if source == "demo":
+        st.sidebar.caption("Modo desarrollo: no usa token ni permisos reales de API.")
     if st.sidebar.button("Cerrar sesión", width="stretch"):
         logout()
         st.rerun()
