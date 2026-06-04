@@ -7,10 +7,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from frontend.components.branding import render_fullscreen_loader
 from frontend.constants import PRIORIDAD_COLOR, PRIORIDAD_ORDEN_MAPA
 from frontend.data import (
     features_to_frame,
     filtered_geojson,
+    load_api_health,
     load_regional_um_parcelas_geojson,
     load_zonificacion_regional,
 )
@@ -24,6 +26,10 @@ COLOR_OPTIONS = {
     "% alta/crítica": "pct_alta_critica",
     "Superficie cultivada": "area_cultivada_ha",
 }
+
+
+def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8")
 
 
 def render_regional_metrics(df: pd.DataFrame) -> None:
@@ -293,6 +299,39 @@ def render_um_parcelas_summary(parcelas: pd.DataFrame) -> None:
         f"{ranked['prioridad_score'].mean():.1f}" if not ranked.empty else "-",
     )
 
+    if {"cultivo", "prioridad_score", "riesgo_actual"}.issubset(ranked.columns):
+        crop_summary = (
+            ranked.groupby("cultivo", dropna=False)
+            .agg(
+                parcelas=("parcela_id", "count"),
+                riesgo_promedio=("riesgo_actual", "mean"),
+                score_promedio=("prioridad_score", "mean"),
+                alta_critica=(
+                    "prioridad_visual"
+                    if "prioridad_visual" in ranked.columns
+                    else "prioridad",
+                    lambda s: int(s.isin(["alta", "critica"]).sum()),
+                ),
+            )
+            .reset_index()
+        )
+        for col in ["riesgo_promedio", "score_promedio"]:
+            crop_summary[col] = crop_summary[col].round(1)
+        st.markdown("**Comparación por cultivo en la UM**")
+        st.dataframe(
+            crop_summary.rename(
+                columns={
+                    "cultivo": "Cultivo",
+                    "parcelas": "Parcelas",
+                    "riesgo_promedio": "Riesgo promedio",
+                    "score_promedio": "Score promedio",
+                    "alta_critica": "Alta/crítica",
+                }
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+
 
 def render_um_parcelas_table(parcelas: pd.DataFrame) -> None:
     if parcelas.empty:
@@ -334,6 +373,149 @@ def render_um_parcelas_table(parcelas: pd.DataFrame) -> None:
         st.caption(f"Mostrando 100 de {len(table):,} parcelas de la UM.".replace(",", "."))
 
 
+def render_regional_focus_tab(df: pd.DataFrame) -> None:
+    st.subheader("Foco regional")
+    if df.empty:
+        st.info("No hay UM visibles con los filtros actuales.")
+        return
+
+    ranked = df[df["ranking_um"].notna()].copy() if "ranking_um" in df.columns else df.copy()
+    if ranked.empty:
+        st.info("No hay UM rankeadas para resumir.")
+        return
+
+    cols = [
+        "ranking_um",
+        "nombre",
+        "cuenca",
+        "parcelas_total",
+        "parcelas_rankeadas",
+        "pct_parcelas_rankeadas",
+        "prioridad_score_prom_pond",
+        "riesgo_actual_prom_pond",
+        "riesgo_10d_prom_pond",
+        "delta_10d_prom_pond",
+        "pct_alta_critica",
+    ]
+    cols = [col for col in cols if col in ranked.columns]
+    labels = {
+        "ranking_um": "Ranking",
+        "nombre": "UM",
+        "cuenca": "Cuenca",
+        "parcelas_total": "Parcelas",
+        "parcelas_rankeadas": "Rankeadas",
+        "pct_parcelas_rankeadas": "% cobertura",
+        "prioridad_score_prom_pond": "Score",
+        "riesgo_actual_prom_pond": "Riesgo actual",
+        "riesgo_10d_prom_pond": "Riesgo 10 días",
+        "delta_10d_prom_pond": "Delta 10 días",
+        "pct_alta_critica": "% alta/crítica",
+    }
+
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**Mayor aumento proyectado**")
+        if "delta_10d_prom_pond" in ranked.columns:
+            table = ranked.sort_values("delta_10d_prom_pond", ascending=False)[cols].head(10)
+            st.dataframe(table.rename(columns=labels), hide_index=True, width="stretch")
+        else:
+            st.info("No hay columna de delta regional.")
+
+    with right:
+        st.markdown("**Mayor concentración alta/crítica**")
+        if "pct_alta_critica" in ranked.columns:
+            table = ranked.sort_values("pct_alta_critica", ascending=False)[cols].head(10)
+            st.dataframe(table.rename(columns=labels), hide_index=True, width="stretch")
+        else:
+            st.info("No hay columna de alta/crítica regional.")
+
+    export_cols = [col for col in cols if col in ranked.columns]
+    export_df = ranked.sort_values("ranking_um", na_position="last")[export_cols].copy()
+    st.download_button(
+        "Descargar foco regional CSV",
+        data=dataframe_to_csv_bytes(export_df),
+        file_name="foco_regional_um.csv",
+        mime="text/csv",
+    )
+
+    if {"riesgo_actual_prom_pond", "delta_10d_prom_pond"}.issubset(ranked.columns):
+        st.markdown("**Riesgo actual vs. aumento proyectado**")
+        chart = ranked.copy()
+        chart["nombre_mapa"] = chart.get("nombre", chart.get("um_id", "UM")).astype(str)
+        hover_data = {"ranking_um": True} if "ranking_um" in chart.columns else {}
+        if "pct_alta_critica" in chart.columns:
+            hover_data["pct_alta_critica"] = ":.1f"
+        if "pct_parcelas_rankeadas" in chart.columns:
+            hover_data["pct_parcelas_rankeadas"] = ":.1f"
+        fig = px.scatter(
+            chart,
+            x="riesgo_actual_prom_pond",
+            y="delta_10d_prom_pond",
+            size="parcelas_total" if "parcelas_total" in chart.columns else None,
+            color="prioridad_regional_visual"
+            if "prioridad_regional_visual" in chart.columns
+            else None,
+            color_discrete_map=PRIORIDAD_COLOR,
+            hover_name="nombre_mapa",
+            hover_data=hover_data,
+        )
+        fig.update_layout(
+            height=360,
+            xaxis_title="Riesgo actual promedio",
+            yaxis_title="Aumento proyectado a 10 días",
+            margin={"r": 10, "t": 10, "l": 10, "b": 10},
+        )
+        st.plotly_chart(fig, width="stretch")
+
+    if {"vid_parcelas", "olivo_parcelas", "nombre"}.issubset(ranked.columns):
+        st.markdown("**Composición vid/olivo por UM**")
+        composition_cols = [
+            "nombre",
+            "vid_parcelas",
+            "olivo_parcelas",
+            "parcelas_total",
+            "prioridad_score_prom_pond",
+        ]
+        composition_cols = [col for col in composition_cols if col in ranked.columns]
+        composition = (
+            ranked.sort_values("parcelas_total", ascending=False)
+            .head(15)[composition_cols]
+            .copy()
+        )
+        chart = composition.melt(
+            id_vars=["nombre"],
+            value_vars=[col for col in ["vid_parcelas", "olivo_parcelas"] if col in composition.columns],
+            var_name="cultivo",
+            value_name="parcelas",
+        )
+        chart["cultivo"] = chart["cultivo"].map(
+            {"vid_parcelas": "Vid", "olivo_parcelas": "Olivo"}
+        )
+        fig = px.bar(
+            chart,
+            x="nombre",
+            y="parcelas",
+            color="cultivo",
+            barmode="stack",
+            color_discrete_map={"Vid": "#0c818a", "Olivo": "#7a9a01"},
+        )
+        fig.update_layout(
+            height=340,
+            margin={"r": 10, "t": 10, "l": 10, "b": 80},
+            xaxis_title="UM",
+            yaxis_title="Parcelas",
+            legend_title_text="Cultivo",
+        )
+        st.plotly_chart(fig, width="stretch")
+
+    if "pct_parcelas_rankeadas" in ranked.columns:
+        low_coverage = ranked[ranked["pct_parcelas_rankeadas"] < 80].copy()
+        if not low_coverage.empty:
+            st.markdown("**UM con baja cobertura de ranking**")
+            table = low_coverage.sort_values("pct_parcelas_rankeadas")[cols].head(10)
+            st.dataframe(table.rename(columns=labels), hide_index=True, width="stretch")
+
+
 def render_um_parcelas_tab() -> None:
     selected_id = st.session_state.get("selected_um_id")
     if selected_id is None:
@@ -346,6 +528,12 @@ def render_um_parcelas_tab() -> None:
         return
 
     st.subheader("Parcelas dentro de la UM")
+    st.download_button(
+        "Descargar parcelas de la UM CSV",
+        data=dataframe_to_csv_bytes(parcelas),
+        file_name=f"parcelas_um_{int(selected_id)}.csv",
+        mime="text/csv",
+    )
     render_um_parcelas_table(parcelas)
 
     st.subheader("Mapa de parcelas de la UM")
@@ -403,6 +591,12 @@ def render_regional_table(df: pd.DataFrame) -> None:
         "pct_critica": "% crítica",
     }
     table = df.sort_values("ranking_um")[cols].rename(columns=labels)
+    st.download_button(
+        "Descargar ranking UM CSV",
+        data=dataframe_to_csv_bytes(table),
+        file_name="ranking_um.csv",
+        mime="text/csv",
+    )
     st.dataframe(table, hide_index=True, width="stretch")
 
 
@@ -410,13 +604,27 @@ def render_regional_view() -> None:
     st.title("Prioridad regional por UM")
     st.caption("UM DGI con parcelas oficiales de vid/olivo dentro de San Rafael")
 
-    data, df = load_zonificacion_regional()
+    loading = render_fullscreen_loader("Cargando zonificación regional...")
+    with st.spinner("Cargando zonificación regional..."):
+        data, df = load_zonificacion_regional()
+    loading.empty()
+
+    health = load_api_health()
+    source = data.get("source", "desconocida")
+    st.sidebar.caption(f"Fuente regional: {source}")
+    if not health.get("available"):
+        st.sidebar.error("API no disponible. Se usa fallback local si existe.")
+    elif source == "postgis":
+        st.sidebar.success("Datos regionales desde PostGIS")
+    elif source in {"csv", "local"}:
+        st.sidebar.warning("Datos regionales desde fallback local/CSV.")
+
     filtered, color_by = render_regional_sidebar(df)
     filtered_data = filter_zonificacion_geojson(data, set(filtered["zona_id"].astype(int)))
 
     render_regional_metrics(filtered)
-    tab_mapa, tab_parcelas, tab_datos = st.tabs(
-        ["Mapa regional", "Parcelas de la UM", "Ranking UM"]
+    tab_mapa, tab_foco, tab_parcelas, tab_datos = st.tabs(
+        ["Mapa regional", "Foco regional", "Parcelas de la UM", "Ranking UM"]
     )
     with tab_mapa:
         left, right = st.columns([2.2, 1.0])
@@ -436,5 +644,7 @@ def render_regional_view() -> None:
             render_regional_side_panel(filtered)
     with tab_datos:
         render_regional_table(filtered)
+    with tab_foco:
+        render_regional_focus_tab(filtered)
     with tab_parcelas:
         render_um_parcelas_tab()

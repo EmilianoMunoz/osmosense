@@ -27,11 +27,49 @@ def auth_headers(token: str | None = None) -> dict[str, str] | None:
     return {"Authorization": f"Bearer {token}"}
 
 
+@st.cache_data(show_spinner=False, ttl=30)
+def fetch_api_health(base_url: str) -> dict[str, Any]:
+    try:
+        response = requests.get(f"{base_url}/health", timeout=3)
+        response.raise_for_status()
+        payload = response.json()
+        return {
+            "available": payload.get("status") == "ok",
+            "status": payload.get("status"),
+            "base_url": base_url,
+        }
+    except requests.RequestException as exc:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "base_url": base_url,
+            "error": str(exc),
+        }
+
+
+def load_api_health() -> dict[str, Any]:
+    return fetch_api_health(api_base_url())
+
+
 @st.cache_data(show_spinner=False)
 def fetch_geojson_from_api(base_url: str, token: str | None) -> dict[str, Any] | None:
     try:
         response = requests.get(
             f"{base_url}/rankings/latest/geojson",
+            headers=auth_headers(token),
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException:
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def fetch_pipeline_state_from_api(base_url: str, token: str | None) -> dict[str, Any] | None:
+    try:
+        response = requests.get(
+            f"{base_url}/pipeline/state",
             headers=auth_headers(token),
             timeout=5,
         )
@@ -65,7 +103,7 @@ def fetch_cliente_geojson_from_api(
         response = requests.get(
             f"{base_url}/clientes/{cliente_id}/rankings/latest/geojson",
             headers=auth_headers(token),
-            timeout=5,
+            timeout=20,
         )
         response.raise_for_status()
         return response.json()
@@ -186,7 +224,7 @@ def fetch_regional_um_geojson_from_api(base_url: str, token: str | None) -> dict
         response = requests.get(
             f"{base_url}/regional/um/latest/geojson",
             headers=auth_headers(token),
-            timeout=5,
+            timeout=20,
         )
         response.raise_for_status()
         return response.json()
@@ -204,7 +242,7 @@ def fetch_regional_um_parcelas_geojson_from_api(
         response = requests.get(
             f"{base_url}/regional/um/{um_id}/parcelas/latest/geojson",
             headers=auth_headers(token),
-            timeout=5,
+            timeout=20,
         )
         response.raise_for_status()
         return response.json()
@@ -257,6 +295,70 @@ def load_geojson(cliente_id: int | None = None) -> dict[str, Any]:
     if data is not None:
         return data
     return load_geojson_local()
+
+
+def load_pipeline_state() -> dict[str, Any]:
+    data = fetch_pipeline_state_from_api(api_base_url(), auth_token())
+    if data is not None:
+        return data
+    return {
+        "source": "api_unavailable",
+        "exists": False,
+        "state": {},
+        "ranking_summary": {},
+    }
+
+
+@st.cache_data(show_spinner=False)
+def load_parcela_history(
+    parcela_id: int,
+    path: str = "backend/data/dataset_temporal_hidrico.csv",
+    limit: int = 14,
+) -> pd.DataFrame:
+    history_path = os.fspath(path)
+    if not os.path.exists(history_path):
+        return pd.DataFrame()
+
+    requested_cols = [
+        "parcela_id",
+        "fecha",
+        "fecha_fin",
+        "cultivo",
+        "ndvi_mean",
+        "ndmi_mean",
+        "msi_mean",
+        "nbr_mean",
+        "ndwi_mean",
+        "savi_mean",
+    ]
+
+    header = pd.read_csv(history_path, nrows=0)
+    usecols = [col for col in requested_cols if col in header.columns]
+    if "parcela_id" not in usecols:
+        return pd.DataFrame()
+
+    df = pd.read_csv(history_path, usecols=usecols)
+    df = df[df["parcela_id"].astype(int) == int(parcela_id)].copy()
+    if df.empty:
+        return df
+
+    df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
+    df = df.dropna(subset=["fecha"]).sort_values("fecha").tail(limit)
+
+    numeric_cols = [
+        "ndvi_mean",
+        "ndmi_mean",
+        "msi_mean",
+        "nbr_mean",
+        "ndwi_mean",
+        "savi_mean",
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df["fecha"] = df["fecha"].dt.strftime("%Y-%m-%d")
+    return df.reset_index(drop=True)
 
 
 def admin_disponibles_to_geojson(data: dict[str, Any]) -> dict[str, Any]:
@@ -328,6 +430,8 @@ def features_to_frame(data: dict[str, Any]) -> pd.DataFrame:
         "neighbor_riesgo_actual_median",
         "riesgo_actual_vs_neighbor_median",
         "abs_riesgo_actual_vs_neighbor_median",
+        "riesgo_actual_suavizado",
+        "prioridad_score_suavizado",
         "riesgo_hidrico_lag1",
         "riesgo_hidrico_lag2",
         "historial_reciente_count",
@@ -373,6 +477,14 @@ def features_to_frame(data: dict[str, Any]) -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     if "accion_recomendada" in df.columns:
         df["accion_visual"] = df["accion_recomendada"].fillna("sin_accion")
+    if "ranking_global" in df.columns:
+        ranked = df["ranking_global"].notna()
+        estado = pd.Series("Pendiente de primera evaluación", index=df.index)
+        estado.loc[ranked] = "Evaluada"
+        if "fecha_lectura" in df.columns:
+            with_reading = df["fecha_lectura"].notna() & ~ranked
+            estado.loc[with_reading] = "Con lectura fuera de ranking latest"
+        df["estado_evaluacion"] = estado
     if "ranking_global" in df.columns:
         return df.sort_values("ranking_global", na_position="last")
     if "ranking_um" in df.columns:

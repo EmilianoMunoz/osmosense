@@ -129,6 +129,8 @@ AUDIT_NUMERIC_COLUMNS = {
     "dias_desde_ultimo_ruido",
 }
 UNRANKED_PRIORITY = "sin ranking"
+SCORE_SMOOTHING_ACTIONS = {"revisar_visual_antes_de_suavizar"}
+RISK_SCORE_WEIGHT = 0.30
 
 
 def database_url() -> str | None:
@@ -315,9 +317,149 @@ def _merge_quality_audits(df: pd.DataFrame) -> pd.DataFrame:
     if "neighbor_evaluable" in merged.columns:
         merged["neighbor_evaluable"] = merged["neighbor_evaluable"].fillna(False).astype(bool)
 
+    merged = _apply_conflict_adjustments(merged)
     merged["confianza_lectura"] = merged.apply(_confidence_label, axis=1)
     merged["confianza_motivo"] = merged.apply(_confidence_reason, axis=1)
     return merged
+
+
+def _smooth_risk_reference(row: pd.Series) -> tuple[float | None, str | None]:
+    recent = row.get("riesgo_reciente_weighted_mean")
+    neighbor = row.get("neighbor_riesgo_actual_median")
+
+    if pd.notna(recent) and pd.notna(neighbor):
+        return float(0.65 * recent + 0.35 * neighbor), "temporal_vecinal"
+    if pd.notna(recent):
+        return float(recent), "temporal"
+    if pd.notna(neighbor):
+        return float(neighbor), "vecinal"
+    return None, None
+
+
+def _apply_conflict_adjustments(df: pd.DataFrame) -> pd.DataFrame:
+    adjusted = df.copy()
+    adjusted["score_suavizado"] = False
+    adjusted["outlier_especial"] = False
+    adjusted["riesgo_actual_suavizado"] = pd.NA
+    adjusted["prioridad_score_suavizado"] = pd.NA
+    adjusted["suavizado_referencia"] = pd.NA
+    adjusted["suavizado_motivo"] = pd.NA
+
+    if "accion_recomendada" not in adjusted.columns:
+        adjusted["accion_recomendada"] = pd.NA
+
+    for idx, row in adjusted.iterrows():
+        action = row.get("accion_recomendada")
+        smooth_candidate = action in SCORE_SMOOTHING_ACTIONS
+        reference, reference_name = _smooth_risk_reference(row)
+
+        if smooth_candidate and reference is not None and pd.notna(row.get("riesgo_actual")):
+            riesgo_actual = float(row["riesgo_actual"])
+            smoothed_risk = max(0.0, min(100.0, reference))
+            adjusted.at[idx, "score_suavizado"] = True
+            adjusted.at[idx, "riesgo_actual_suavizado"] = smoothed_risk
+            adjusted.at[idx, "suavizado_referencia"] = reference_name
+            adjusted.at[idx, "suavizado_motivo"] = "conflicto_revisado_suavizado"
+
+            if pd.notna(row.get("prioridad_score")):
+                smoothed_score = float(row["prioridad_score"]) + RISK_SCORE_WEIGHT * (
+                    smoothed_risk - riesgo_actual
+                )
+                adjusted.at[idx, "prioridad_score_suavizado"] = max(
+                    0.0,
+                    min(100.0, smoothed_score),
+                )
+            continue
+
+        adjusted.at[idx, "outlier_especial"] = (
+            bool(row.get("outlier_espacial", False))
+            and row.get("diagnostico_outlier") == "probable_ruido_o_lectura_puntual"
+        )
+
+    return adjusted
+
+
+def _enrich_feature_collection_quality(data: dict[str, Any]) -> dict[str, Any]:
+    features = data.get("features", [])
+    if not features:
+        return data
+
+    rows = []
+    for feature in features:
+        props = feature.get("properties", {})
+        if props.get("parcela_id") is None:
+            continue
+        rows.append(props.copy())
+
+    if not rows:
+        return data
+
+    df = pd.DataFrame(rows)
+    if "parcela_id" not in df.columns:
+        return data
+
+    df["parcela_id"] = pd.to_numeric(df["parcela_id"], errors="coerce")
+    df = df[df["parcela_id"].notna()].copy()
+    if df.empty:
+        return data
+    df["parcela_id"] = df["parcela_id"].astype(int)
+
+    if "ranking_global" in df.columns:
+        df["ranking_global"] = pd.to_numeric(df["ranking_global"], errors="coerce")
+
+    if "en_ranking_latest" not in df.columns:
+        df["en_ranking_latest"] = (
+            df["ranking_global"].notna() if "ranking_global" in df.columns else True
+        )
+
+    if "estado_cobertura" not in df.columns:
+        df["estado_cobertura"] = df["en_ranking_latest"].map(
+            {True: "rankeada", False: "sin_ranking_latest"}
+        )
+
+    if "prioridad" not in df.columns:
+        df["prioridad"] = UNRANKED_PRIORITY
+    else:
+        df["prioridad"] = df["prioridad"].fillna(UNRANKED_PRIORITY)
+
+    enriched = _merge_quality_audits(df)
+    enriched_by_id = enriched.drop_duplicates("parcela_id", keep="first").set_index("parcela_id")
+
+    updated_features = []
+    for feature in features:
+        props = feature.get("properties", {})
+        parcela_id = props.get("parcela_id")
+        try:
+            parcela_id_int = int(parcela_id)
+        except (TypeError, ValueError):
+            updated_features.append(feature)
+            continue
+
+        if parcela_id_int not in enriched_by_id.index:
+            updated_features.append(feature)
+            continue
+
+        row = enriched_by_id.loc[parcela_id_int]
+        enriched_props = {
+            key: _clean_value(value)
+            for key, value in row.to_dict().items()
+        }
+        updated_feature = feature.copy()
+        updated_feature["properties"] = {**props, **enriched_props}
+        updated_features.append(updated_feature)
+
+    enriched_data = data.copy()
+    enriched_data["features"] = updated_features
+    enriched_data.setdefault("total_count", len(updated_features))
+    enriched_data.setdefault(
+        "ranked_count",
+        sum(
+            1
+            for feature in updated_features
+            if feature.get("properties", {}).get("ranking_global") is not None
+        ),
+    )
+    return enriched_data
 
 
 def _confidence_label(row: pd.Series) -> str:
@@ -690,7 +832,7 @@ def latest_geojson_from_postgis() -> dict[str, Any]:
             cur.execute(query)
             result = cur.fetchone()[0]
 
-    return result
+    return _enrich_feature_collection_quality(result)
 
 
 def clientes_from_postgis() -> list[dict[str, Any]]:
@@ -746,7 +888,7 @@ def latest_geojson_cliente_from_postgis(cliente_id: int) -> dict[str, Any]:
 
     if result["total_count"] == 0:
         raise ValueError(f"Cliente inexistente, inactivo o sin parcelas: {cliente_id}")
-    return result
+    return _enrich_feature_collection_quality(result)
 
 
 def regional_um_latest_from_postgis(limit: int | None = None) -> list[dict[str, Any]]:

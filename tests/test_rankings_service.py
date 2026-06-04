@@ -82,6 +82,83 @@ class RankingsServiceTest(unittest.TestCase):
         self.assertGreater(result["total_count"], 0)
         self.assertGreater(len(result["features"]), 0)
 
+    def test_postgis_feature_collection_is_enriched_with_quality_audits(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            vecinos_path = Path(tmpdir) / "vecinos.csv"
+            temporal_path = Path(tmpdir) / "temporal.csv"
+            ruido_path = Path(tmpdir) / "ruido.csv"
+            historicas_path = Path(tmpdir) / "historicas.csv"
+
+            pd.DataFrame(
+                [
+                    {
+                        "parcela_id": 10,
+                        "neighbor_count": 5,
+                        "neighbor_riesgo_actual_median": 40.0,
+                        "outlier_espacial": True,
+                        "tipo_outlier_espacial": "alto",
+                    }
+                ]
+            ).to_csv(vecinos_path, index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "parcela_id": 10,
+                        "diagnostico_outlier": "probable_ruido_o_lectura_puntual",
+                        "historial_reciente_count": 3,
+                        "riesgo_reciente_weighted_mean": 50.0,
+                    }
+                ]
+            ).to_csv(temporal_path, index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "parcela_id": 10,
+                        "motivo_ruido": "lectura_puntual_indeterminada",
+                        "severidad_ruido": 55.0,
+                        "accion_recomendada": "revisar_visual_antes_de_suavizar",
+                    }
+                ]
+            ).to_csv(ruido_path, index=False)
+            pd.DataFrame([{"parcela_id": 10, "outlier_count_30d": 2}]).to_csv(
+                historicas_path,
+                index=False,
+            )
+            data = {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [0, 0]},
+                        "properties": {
+                            "parcela_id": 10,
+                            "ranking_global": 1,
+                            "prioridad": "alta",
+                            "prioridad_score": 60.0,
+                            "riesgo_actual": 80.0,
+                        },
+                    }
+                ],
+            }
+
+            with (
+                patch.object(rankings, "AUDIT_VECINOS_CSV", str(vecinos_path)),
+                patch.object(rankings, "AUDIT_TEMPORAL_CSV", str(temporal_path)),
+                patch.object(rankings, "AUDIT_RUIDO_CSV", str(ruido_path)),
+                patch.object(rankings, "AUDIT_HISTORICAL_METRICS_CSV", str(historicas_path)),
+            ):
+                result = rankings._enrich_feature_collection_quality(data)
+
+        props = result["features"][0]["properties"]
+        self.assertTrue(props["outlier_espacial"])
+        self.assertFalse(props["outlier_especial"])
+        self.assertTrue(props["score_suavizado"])
+        self.assertIn("riesgo_actual_suavizado", props)
+        self.assertIn("prioridad_score_suavizado", props)
+        self.assertEqual(props["diagnostico_outlier"], "probable_ruido_o_lectura_puntual")
+        self.assertEqual(props["accion_recomendada"], "revisar_visual_antes_de_suavizar")
+        self.assertEqual(props["confianza_lectura"], "baja")
+
     def test_ranking_by_fecha_from_local_csv_respects_limit(self):
         with patch.object(rankings, "database_url", return_value=None):
             result = rankings.ranking_by_fecha("2024-12-31", limit=3)

@@ -80,6 +80,12 @@ Pipeline cloud con actualización Sentinel y carga PostGIS:
 venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date --load-postgis
 ```
 
+Arranque de servicios con actualización previa de ranking solo si hay fecha nueva:
+
+```bash
+./boot.sh start --update-ranking
+```
+
 Dry-run:
 
 ```bash

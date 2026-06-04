@@ -95,6 +95,10 @@ def display_delta(row: pd.Series, horizon: int, admin_mode: bool = True) -> Any:
 
 
 def review_priority(row: pd.Series) -> int:
+    score_suavizado = row.get("score_suavizado", False)
+    if pd.notna(score_suavizado) and bool(score_suavizado):
+        return 99
+
     action = row.get("accion_recomendada")
 
     if action == "revisar_visual_antes_de_suavizar":
@@ -112,7 +116,8 @@ def review_priority(row: pd.Series) -> int:
     if row.get("confianza_lectura") == "baja":
         return 5
 
-    if bool(row.get("outlier_espacial", False)):
+    outlier = row.get("outlier_especial", row.get("outlier_espacial", False))
+    if pd.notna(outlier) and bool(outlier):
         return 6
 
     return 99

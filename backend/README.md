@@ -29,6 +29,12 @@ Primera carga completa local:
 ./boot.sh start --setup --all-parcelas --smoke
 ```
 
+Arranque con actualización operativa de ranking si hay imagen Sentinel nueva:
+
+```bash
+./boot.sh start --update-ranking
+```
+
 Ejecutar pipeline local:
 
 ```bash

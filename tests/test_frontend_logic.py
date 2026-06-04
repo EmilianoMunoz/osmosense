@@ -7,6 +7,7 @@ from frontend.logic import (
     add_regional_dynamic_priority,
     display_delta,
     display_risk,
+    review_priority,
 )
 from frontend import data as frontend_data
 from frontend.data import filtered_geojson
@@ -175,6 +176,18 @@ class FrontendLogicTest(unittest.TestCase):
         self.assertIn("riesgo_operativo_5d", cols)
         self.assertIn("riesgo_operativo_10d", cols)
         self.assertTrue(CLIENT_FORBIDDEN_COLUMNS.isdisjoint(cols))
+
+    def test_smoothed_conflict_is_not_pending_review(self):
+        row = pd.Series(
+            {
+                "score_suavizado": True,
+                "accion_recomendada": "revisar_visual_antes_de_suavizar",
+                "outlier_especial": False,
+                "outlier_espacial": True,
+            }
+        )
+
+        self.assertEqual(review_priority(row), 99)
 
     def test_admin_table_keeps_raw_and_operational_prediction_columns(self):
         available = {

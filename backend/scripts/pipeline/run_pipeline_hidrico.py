@@ -341,6 +341,7 @@ def ejecutar_ranking(args: argparse.Namespace, log_path: Path) -> dict:
     state = {
         "mode": args.mode,
         "last_run_utc": utc_now(),
+        "skipped": False,
         "fecha_rankeada": fecha_usada,
         "input_temporal": args.input,
         "model_dir": args.model_dir,
@@ -732,6 +733,11 @@ def main() -> None:
             "last_run_utc": utc_now(),
             "input_temporal": args.input,
             "fecha_dataset": fecha_despues,
+            "fecha_dataset_antes": fecha_antes,
+            "fecha_dataset_despues": fecha_despues,
+            "log_path": str(log_path),
+            "update_sentinel": args.update_sentinel,
+            "load_postgis": args.load_postgis,
             "skipped": True,
             "reason": "sin_fecha_nueva",
         }
@@ -743,6 +749,13 @@ def main() -> None:
 
     log(f"Paso 2/{total_steps}: generar ranking", log_path)
     state = ejecutar_ranking(args, log_path)
+    state["fecha_dataset_antes"] = fecha_antes
+    state["fecha_dataset_despues"] = fecha_despues
+    state["log_path"] = str(log_path)
+    state["update_sentinel"] = args.update_sentinel
+    state["load_postgis"] = args.load_postgis
+    if not args.dry_run:
+        guardar_estado(Path(args.state_dir), state)
 
     step = 3
     if args.update_zonificacion_um:

@@ -28,6 +28,7 @@ from backend.app.services.rankings import (
     regional_um_latest_geojson,
     regional_um_parcelas_latest_geojson,
 )
+from backend.app.services.pipeline_state import pipeline_state
 from backend.app.services.users import admin_create_usuario, admin_update_usuario, admin_usuarios
 
 
@@ -190,6 +191,16 @@ def get_latest_ranking_geojson(
 ) -> dict:
     try:
         return latest_geojson()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/pipeline/state")
+def get_pipeline_state(
+    _user: dict[str, Any] = Depends(require_roles("admin")),
+) -> dict:
+    try:
+        return pipeline_state()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

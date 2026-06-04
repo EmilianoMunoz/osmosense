@@ -22,15 +22,16 @@ shift || true
 RUN_SETUP=false
 ALL_PARCELAS=false
 RUN_SMOKE=false
+RUN_UPDATE_RANKING=false
 API_ONLY=false
 DASHBOARD_ONLY=false
 
 usage() {
     cat <<EOF
 Uso:
-  ./boot.sh start [--setup] [--all-parcelas] [--smoke] [--api-only|--dashboard-only]
+  ./boot.sh start [--setup] [--all-parcelas] [--update-ranking] [--smoke] [--api-only|--dashboard-only]
   ./boot.sh stop
-  ./boot.sh restart [--setup] [--all-parcelas] [--smoke]
+  ./boot.sh restart [--setup] [--all-parcelas] [--update-ranking] [--smoke]
   ./boot.sh status
 
 Variables opcionales:
@@ -39,6 +40,7 @@ Variables opcionales:
 Notas:
   --setup         aplica schema y carga datos operativos en PostGIS.
   --all-parcelas con --setup carga todas las parcelas oficiales para disponibles.
+  --update-ranking consulta Sentinel/GEE y recalcula/carga ranking solo si hay fecha nueva.
   --smoke         corre smoke test API/PostGIS al final.
 EOF
 }
@@ -53,6 +55,9 @@ while [[ $# -gt 0 ]]; do
             ;;
         --smoke)
             RUN_SMOKE=true
+            ;;
+        --update-ranking)
+            RUN_UPDATE_RANKING=true
             ;;
         --api-only)
             API_ONLY=true
@@ -205,6 +210,17 @@ run_smoke() {
         venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis --check-postgis
 }
 
+run_update_ranking() {
+    log "Ejecutando pipeline hídrico con búsqueda de nueva imagen Sentinel"
+    DATABASE_URL="${DATABASE_URL:-$DEFAULT_DATABASE_URL}" \
+        venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py \
+        --mode cloud \
+        --update-sentinel \
+        --parcel-source postgis \
+        --skip-if-no-new-date \
+        --load-postgis
+}
+
 status() {
     if docker info >/dev/null 2>&1; then
         docker compose -f "$POSTGIS_COMPOSE" ps || true
@@ -230,6 +246,9 @@ start() {
         start_postgis
         if [[ "$RUN_SETUP" == true ]]; then
             setup_postgis
+        fi
+        if [[ "$RUN_UPDATE_RANKING" == true ]]; then
+            run_update_ranking
         fi
         start_api
         wait_api

@@ -38,6 +38,19 @@ class RankingsApiHandlersTest(unittest.TestCase):
         self.assertEqual(result["type"], "FeatureCollection")
         self.assertGreater(len(result["features"]), 0)
 
+    def test_pipeline_state_handler_delegates_to_service(self):
+        expected = {
+            "source": "state_file",
+            "exists": True,
+            "state": {"skipped": True},
+            "ranking_summary": {},
+        }
+        with patch.object(main, "pipeline_state", return_value=expected) as mocked:
+            result = main.get_pipeline_state()
+
+        mocked.assert_called_once_with()
+        self.assertEqual(result, expected)
+
     def test_ranking_by_fecha_handler(self):
         with patch.object(rankings, "database_url", return_value=None):
             result = main.get_ranking_by_fecha("2024-12-31", limit=3)

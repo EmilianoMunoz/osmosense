@@ -11,7 +11,7 @@ satelitales Sentinel-2 y modelos de inteligencia artificial.
 - Cálculo de índices espectrales por parcela
 - Ranking hídrico satelital relativo para vid y olivo
 - Predicción/proyección a 5 y 10 días
-- Visualización web para Admin, Cliente y Regional
+- Visualización web para Admin, Productor y Regional
 - Zonificación regional por UM con ranking agregado
 - API FastAPI con fallback local o PostGIS
 - Pipeline local/cloud preparado para automatización

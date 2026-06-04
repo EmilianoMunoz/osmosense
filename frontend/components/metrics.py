@@ -26,14 +26,15 @@ def render_metrics(df: pd.DataFrame, admin_mode: bool = True) -> None:
     col7.metric("Olivo", int((df["cultivo"] == "olivo").sum()))
     col8.metric("Evaluadas", f"{rankeadas:,}".replace(",", "."))
 
-    outliers = int(df.get("outlier_espacial", pd.Series(dtype=bool)).fillna(False).astype(bool).sum())
+    outlier_col = "outlier_especial" if "outlier_especial" in df.columns else "outlier_espacial"
+    outliers = int(df.get(outlier_col, pd.Series(dtype=bool)).fillna(False).astype(bool).sum())
     baja_confianza = int((df.get("confianza_lectura", pd.Series(dtype=str)) == "baja").sum())
 
     col9, col10, col11, col12 = st.columns(4)
     col9.metric("Sin ranking", f"{sin_ranking:,}".replace(",", "."))
     col10.metric("Score máximo", f"{top_score:.1f}" if pd.notna(top_score) else "-")
     if admin_mode:
-        col11.metric("Outliers", outliers)
+        col11.metric("Outliers especiales", outliers)
         col12.metric("Conf. baja", baja_confianza)
     else:
         crit_alta = int((df[priority_col].isin(["critica", "alta"])).sum())

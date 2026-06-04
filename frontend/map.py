@@ -221,9 +221,15 @@ def map_hover_data(admin_mode: bool, df: pd.DataFrame) -> dict[str, Any]:
 
     if "estado_cobertura" in df.columns:
         hover_data["estado_cobertura"] = True
+    if "estado_evaluacion" in df.columns:
+        hover_data["estado_evaluacion"] = True
 
     optional_hover = {
         "confianza_lectura": True,
+        "outlier_especial": True,
+        "score_suavizado": True,
+        "riesgo_actual_suavizado": ":.1f",
+        "prioridad_score_suavizado": ":.1f",
         "outlier_espacial": True,
         "tipo_outlier_espacial": True,
         "persistencia_temporal": True,

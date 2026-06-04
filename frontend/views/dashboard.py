@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import pandas as pd
 import streamlit as st
 
@@ -11,14 +13,17 @@ from frontend.data import (
     filtered_geojson,
     load_admin_parcelas_disponibles,
     load_admin_usuarios,
+    load_api_health,
     load_clientes,
     load_geojson,
+    load_pipeline_state,
     update_usuario,
 )
 from frontend.logic import add_dynamic_priority, cliente_changed, priority_options, review_priority
 from frontend.map import bbox_center_zoom, render_map
+from frontend.components.branding import apply_brand_theme, render_fullscreen_loader
 from frontend.components.charts import render_distribution, render_prediction_panel
-from frontend.components.client_overview import render_client_field_status
+from frontend.components.client_overview import render_client_field_overview, render_client_field_status
 from frontend.components.metrics import render_client_metrics, render_metrics
 from frontend.components.parcel_detail import render_client_parcel_dialog, render_parcel_dialog
 from frontend.components.tables import (
@@ -266,9 +271,146 @@ def sync_geojson_properties_from_df(data: dict, df: pd.DataFrame) -> dict:
     synced["features"] = features
     return synced
 
+
+def _format_state_value(value: object) -> str:
+    if value is None or value == "":
+        return "-"
+    if isinstance(value, bool):
+        return "sí" if value else "no"
+    return str(value)
+
+
+def _format_datetime_value(value: object) -> str:
+    if value is None or value == "":
+        return "-"
+    try:
+        text = str(value).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone()
+        return dt.strftime("%d/%m/%Y %H:%M")
+    except ValueError:
+        return str(value)
+
+
+def _human_pipeline_reason(reason: object) -> str:
+    reasons = {
+        "sin_fecha_nueva": "Sin imagen Sentinel nueva",
+        "error": "Error de ejecución",
+        None: "Sin observaciones",
+        "": "Sin observaciones",
+    }
+    return reasons.get(reason, str(reason))
+
+
+def _human_source(source: object) -> str:
+    sources = {
+        "postgis": "PostGIS",
+        "csv": "CSV vía API",
+        "local": "Fallback local",
+        "api_unavailable": "API no disponible",
+    }
+    return sources.get(source, str(source or "desconocida"))
+
+
+def render_runtime_notices(data: dict) -> None:
+    health = load_api_health()
+    source = data.get("source")
+
+    if not health.get("available"):
+        st.sidebar.error("API no disponible. Se está usando fallback local si existe.")
+        return
+
+    st.sidebar.success("API disponible")
+
+    if source == "postgis":
+        st.sidebar.success("Datos operativos desde PostGIS")
+    elif source == "csv":
+        st.sidebar.warning("API disponible, pero el ranking viene de CSV.")
+    elif source == "local":
+        st.sidebar.warning("Usando fallback local; revisar API/autenticación.")
+    elif source == "api_unavailable":
+        st.sidebar.error("No se pudo obtener datos desde la API.")
+
+
+def render_pipeline_status() -> None:
+    data = load_pipeline_state()
+    state = data.get("state", {}) if isinstance(data, dict) else {}
+    summary = data.get("ranking_summary", {}) if isinstance(data, dict) else {}
+
+    st.subheader("Estado operativo del pipeline")
+
+    if not data.get("exists"):
+        if data.get("source") == "api_unavailable":
+            st.error("No se pudo consultar el estado del pipeline porque la API no respondió.")
+        else:
+            st.info("Todavía no hay estado persistido del pipeline.")
+        return
+
+    skipped = bool(state.get("skipped", False))
+    failed = bool(state.get("failed", False))
+    if failed:
+        status_label = "Error"
+        st.error("La última ejecución del pipeline terminó con error.")
+    elif skipped:
+        status_label = "Sin actualización"
+        st.info("La última ejecución no recalculó ranking porque no encontró una imagen válida nueva.")
+    else:
+        status_label = "Actualizado"
+        st.success("La última ejecución generó o cargó ranking operativo.")
+
+    reason = state.get("reason")
+
+    cols = st.columns(5)
+    cols[0].metric("Estado última corrida", status_label)
+    cols[1].metric("Última ejecución", _format_datetime_value(state.get("last_run_utc")))
+    cols[2].metric(
+        "Última imagen válida",
+        _format_state_value(
+            state.get("fecha_dataset")
+            or state.get("fecha_rankeada")
+            or summary.get("fecha_ranking")
+        ),
+    )
+    cols[3].metric(
+        "PostGIS cargado",
+        _format_state_value(state.get("postgis_loaded")),
+    )
+    cols[4].metric("Resultado", _human_pipeline_reason(reason))
+
+    detail_cols = st.columns(4)
+    detail_cols[0].metric(
+        "Parcelas ranking",
+        f"{int(summary.get('rows', state.get('parcelas', 0))):,}".replace(",", "."),
+    )
+    detail_cols[1].metric(
+        "Fecha antes",
+        _format_state_value(state.get("fecha_dataset_antes")),
+    )
+    detail_cols[2].metric(
+        "Fecha después",
+        _format_state_value(state.get("fecha_dataset_despues")),
+    )
+    detail_cols[3].metric("Modo", _format_state_value(state.get("mode")))
+
+    if summary.get("exists"):
+        st.caption(
+            "Ranking latest: "
+            f"{int(summary.get('rows', 0)):,} filas · ".replace(",", ".")
+            + f"{int(summary.get('evaluadas', 0)):,} evaluadas · ".replace(",", ".")
+            + f"{int(summary.get('sin_ranking', 0)):,} sin ranking".replace(",", ".")
+        )
+
+    if state.get("log_path"):
+        st.caption(f"Log: {state['log_path']}")
+
+
 def render_admin_status_tab(df: pd.DataFrame, filtered: pd.DataFrame) -> None:
     st.subheader("Estado general")
     render_metrics(df, admin_mode=True)
+
+    st.divider()
+    render_pipeline_status()
 
     st.divider()
     st.subheader("Vista activa")
@@ -339,6 +481,15 @@ def render_coverage_tab(df: pd.DataFrame) -> None:
         )
         st.dataframe(confidence, hide_index=True, width="stretch")
 
+    if "estado_evaluacion" in df.columns:
+        st.subheader("Estado de evaluación")
+        estado = (
+            df.groupby(["cultivo", "estado_evaluacion"], dropna=False)
+            .agg(parcelas=("parcela_id", "count"))
+            .reset_index()
+        )
+        st.dataframe(estado, hide_index=True, width="stretch")
+
     missing = df[df["ranking_global"].isna()].copy()
 
     if not missing.empty:
@@ -346,6 +497,7 @@ def render_coverage_tab(df: pd.DataFrame) -> None:
         cols = [
             "parcela_id",
             "cultivo",
+            "estado_evaluacion",
             "estado_cobertura",
             "area_m2",
             "confianza_lectura",
@@ -411,44 +563,6 @@ def render_map_tab(
         st.subheader("Distribución")
         render_distribution(filtered)
 
-    with left:
-        if not admin_mode and selected_cliente_id is not None:
-            map_center, map_zoom = bbox_center_zoom(filtered_data)
-        else:
-            map_center, map_zoom = None, 8.3
-
-        selected_id = st.session_state.get("selected_parcela_id")
-
-        clicked_id = render_map(
-            filtered_data,
-            filtered,
-            color_by=color_by,
-            center=map_center,
-            zoom=map_zoom,
-            selected_id=selected_id,
-            admin_mode=admin_mode,
-            risk_animation=not admin_mode,
-        )
-
-        if clicked_id is not None:
-            st.session_state["selected_parcela_id"] = clicked_id
-            row = filtered[filtered["parcela_id"] == clicked_id]
-
-            if not row.empty and hasattr(st, "dialog"):
-                if admin_mode:
-                    render_parcel_dialog(row.iloc[0].to_dict())
-                else:
-                    render_client_parcel_dialog(row.iloc[0].to_dict())
-
-    with right:
-        st.subheader("Parcela")
-        selected_id = st.session_state.get("selected_parcela_id")
-        render_prediction_panel(filtered, selected_id=selected_id, admin_mode=admin_mode)
-
-        st.subheader("Distribución")
-        render_distribution(filtered)
-
-
 def render_review_tab(filtered: pd.DataFrame) -> None:
     st.subheader("Casos a revisar")
     render_review_cases(filtered)
@@ -488,7 +602,10 @@ def render_available_parcels_tab() -> None:
         step=500,
     )
 
-    data = load_admin_parcelas_disponibles(limit=int(limit))
+    loading = render_fullscreen_loader("Cargando parcelas disponibles...")
+    with st.spinner("Cargando parcelas disponibles..."):
+        data = load_admin_parcelas_disponibles(limit=int(limit))
+    loading.empty()
     df = features_to_frame(data)
 
     if df.empty:
@@ -775,12 +892,60 @@ def render_users_tab() -> None:
                 st.rerun()
 
 
+def render_admin_management_area() -> None:
+    tab_usuarios, tab_parcelas = st.tabs(["Usuarios", "Parcelas y asignación"])
+
+    with tab_usuarios:
+        render_users_tab()
+
+    with tab_parcelas:
+        render_available_parcels_tab()
+
+
+def render_admin_analysis_area(
+    data: dict,
+    df: pd.DataFrame,
+    filtered: pd.DataFrame,
+    filtered_data: dict,
+    color_by: str,
+    selected_cliente_id: int | None,
+    priority_mode: str,
+) -> None:
+    tab_estado, tab_mapa, tab_revision, tab_cobertura, tab_datos = st.tabs(
+        ["Estado", "Mapa operativo", "Revisión técnica", "Cobertura", "Datos"]
+    )
+
+    with tab_estado:
+        render_admin_status_tab(df, filtered)
+
+    with tab_mapa:
+        render_map_tab(
+            data=data,
+            filtered=filtered,
+            filtered_data=filtered_data,
+            color_by=color_by,
+            admin_mode=True,
+            selected_cliente_id=selected_cliente_id,
+            priority_mode=priority_mode,
+        )
+
+    with tab_revision:
+        render_review_tab(filtered)
+
+    with tab_cobertura:
+        render_coverage_tab(df)
+
+    with tab_datos:
+        render_data_tab(filtered, admin_mode=True)
+
+
 def render_dashboard() -> None:
     st.set_page_config(
         page_title="Ranking hídrico San Rafael",
         page_icon=None,
         layout="wide",
     )
+    apply_brand_theme()
 
     if not is_authenticated():
         render_login()
@@ -794,20 +959,49 @@ def render_dashboard() -> None:
         render_regional_view()
         return
 
-    st.title("Ranking hídrico de parcelas")
-    st.caption("San Rafael, Mendoza · Vid y olivo")
+    admin_area = "Análisis"
+    if admin_mode:
+        header_left, header_right = st.columns([0.68, 0.32])
+        with header_left:
+            st.title("Ranking hídrico de parcelas")
+            st.caption("San Rafael, Mendoza · Vid y olivo")
+        with header_right:
+            st.caption("Área admin")
+            admin_area = st.radio(
+                "Área admin",
+                ["Análisis", "Gestión"],
+                horizontal=True,
+                label_visibility="collapsed",
+                key="admin_area",
+            )
+    else:
+        st.title("Ranking hídrico de parcelas")
+        st.caption("San Rafael, Mendoza · Vid y olivo")
+
+    if admin_mode and admin_area == "Gestión":
+        render_admin_management_area()
+        return
 
     selected_cliente_id, _ = select_cliente(admin_mode)
 
-    data = load_geojson(selected_cliente_id)
-    df = features_to_frame(data)
+    loading_message = (
+        "Cargando ranking operativo..."
+        if admin_mode
+        else "Cargando parcelas del productor..."
+    )
+    loading = render_fullscreen_loader(loading_message)
+    with st.spinner(loading_message):
+        data = load_geojson(selected_cliente_id)
+        df = features_to_frame(data)
+    loading.empty()
 
     if df.empty:
         st.error("No se pudo cargar el ranking.")
         return
 
     st.sidebar.header("Vista")
-    st.sidebar.caption(f"Fuente: {data.get('source', 'desconocida')}")
+    st.sidebar.caption(f"Fuente: {_human_source(data.get('source'))}")
+    render_runtime_notices(data)
 
     priority_mode = select_priority_mode(admin_mode)
 
@@ -826,20 +1020,22 @@ def render_dashboard() -> None:
 
     filtered_data = sync_geojson_properties_from_df(data, filtered)
     if admin_mode:
-        tab_estado, tab_usuarios, tab_mapa, tab_disponibles, tab_revision, tab_cobertura, tab_datos = st.tabs(
-            ["Estado", "Usuarios", "Mapa operativo", "Disponibles", "Revisión técnica", "Cobertura", "Datos"]
+        render_admin_analysis_area(
+            data=data,
+            df=df,
+            filtered=filtered,
+            filtered_data=filtered_data,
+            color_by=color_by,
+            selected_cliente_id=selected_cliente_id,
+            priority_mode=priority_mode,
         )
-    else:
-        render_client_metrics(filtered)
-        render_client_field_status(filtered)
-        tab_mapa, tab_datos = st.tabs(["Campo", "Parcelas"])
+        return
 
-    if admin_mode:
-        with tab_estado:
-            render_admin_status_tab(df, filtered)
-
-        with tab_usuarios:
-            render_users_tab()
+    render_client_metrics(filtered)
+    render_client_field_status(filtered)
+    tab_resumen, tab_mapa, tab_datos = st.tabs(["Resumen", "Campo", "Parcelas"])
+    with tab_resumen:
+        render_client_field_overview(filtered)
 
     with tab_mapa:
         render_map_tab(
@@ -851,16 +1047,6 @@ def render_dashboard() -> None:
             selected_cliente_id=selected_cliente_id,
             priority_mode=priority_mode,
         )
-    
-    if admin_mode:
-        with tab_revision:
-            render_review_tab(filtered)
-
-        with tab_disponibles:
-            render_available_parcels_tab()
-
-        with tab_cobertura:
-            render_coverage_tab(df)
 
     with tab_datos:
         render_data_tab(filtered, admin_mode)

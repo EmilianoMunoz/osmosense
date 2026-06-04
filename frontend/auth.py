@@ -7,6 +7,8 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 
+from frontend.components.branding import render_logo, render_sidebar_logo
+
 
 @dataclass(frozen=True)
 class DemoUser:
@@ -187,12 +189,21 @@ def render_login() -> None:
 
     with center:
         with st.container(border=True):
+            
             st.markdown(
                 """
-                <div class="login-title">Estrés hídrico San Rafael</div>
-                <div class="login-subtitle">
-                    Acceso al dashboard de parcelas de vid y olivo
-                </div>
+                <div style="height: 50px;"></div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            logo_left, logo_center, logo_right = st.columns([0.5, 2.0, 0.5])
+            with logo_center:
+                render_logo(width=480)
+
+            st.markdown(
+                """
+                <div style="height: 50px;"></div>
                 """,
                 unsafe_allow_html=True,
             )
@@ -273,6 +284,7 @@ def render_auth_sidebar() -> None:
     label = st.session_state.get("auth_label", "Usuario")
     source = st.session_state.get("auth_source")
     role = st.session_state.get("auth_rol")
+    render_sidebar_logo()
     st.sidebar.header("Sesión")
     if source == "postgis":
         st.sidebar.success("Sesión PostGIS")
