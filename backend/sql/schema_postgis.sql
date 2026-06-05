@@ -170,20 +170,25 @@ CREATE TABLE IF NOT EXISTS usuarios (
     usuario_id bigserial PRIMARY KEY,
     email text NOT NULL UNIQUE,
     nombre text,
+    apellido text,
+    dni text,
     rol text NOT NULL CHECK (rol IN ('admin', 'regional', 'productor')),
     cliente_id bigint REFERENCES clientes(cliente_id),
     password_hash text,
     activo boolean NOT NULL DEFAULT true,
     last_login_at timestamptz,
     created_at timestamptz DEFAULT now(),
-    updated_at timestamptz DEFAULT now(),
-    CONSTRAINT usuarios_cliente_requerido_para_cliente CHECK (
-        rol IN ('admin', 'regional') OR cliente_id IS NOT NULL
-    )
+    updated_at timestamptz DEFAULT now()
 );
 
 ALTER TABLE usuarios
     ADD COLUMN IF NOT EXISTS last_login_at timestamptz;
+
+ALTER TABLE usuarios
+    ADD COLUMN IF NOT EXISTS apellido text;
+
+ALTER TABLE usuarios
+    ADD COLUMN IF NOT EXISTS dni text;
 
 ALTER TABLE usuarios
     ALTER COLUMN password_hash DROP NOT NULL;
@@ -208,9 +213,7 @@ ALTER TABLE usuarios
     );
 
 ALTER TABLE usuarios
-    ADD CONSTRAINT usuarios_cliente_requerido_para_cliente CHECK (
-        rol IN ('admin', 'regional') OR cliente_id IS NOT NULL
-    );
+    DROP CONSTRAINT IF EXISTS usuarios_cliente_requerido_para_cliente;
 
 CREATE TABLE IF NOT EXISTS cliente_parcela (
     cliente_id bigint NOT NULL REFERENCES clientes(cliente_id) ON DELETE CASCADE,

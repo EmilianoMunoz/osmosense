@@ -7,24 +7,19 @@ import streamlit as st
 
 from frontend.auth import is_authenticated, render_auth_sidebar, render_login
 from frontend.data import (
-    activar_parcela_disponible,
-    create_usuario,
     features_to_frame,
     filtered_geojson,
-    load_admin_parcelas_disponibles,
-    load_admin_usuarios,
     load_api_health,
     load_clientes,
     load_geojson,
     load_pipeline_state,
-    update_usuario,
 )
 from frontend.logic import add_dynamic_priority, cliente_changed, priority_options, review_priority
 from frontend.map import bbox_center_zoom, render_map
 from frontend.components.branding import apply_brand_theme, render_fullscreen_loader
 from frontend.components.charts import render_distribution, render_prediction_panel
 from frontend.components.client_overview import render_client_field_overview, render_client_field_status
-from frontend.components.metrics import render_client_metrics, render_metrics
+from frontend.components.metrics import render_client_metrics
 from frontend.components.parcel_detail import render_client_parcel_dialog, render_parcel_dialog
 from frontend.components.tables import (
     build_table_dataframe,
@@ -32,6 +27,7 @@ from frontend.components.tables import (
     render_review_cases,
     render_top_criticas,
 )
+from frontend.views.admin_management import render_admin_management_area
 from frontend.views.regional import render_regional_view
 
 
@@ -169,13 +165,16 @@ def apply_sidebar_filters(
             if show_all_priorities
             else [p for p in ["critica", "alta"] if p in priority_values]
         )
+        priority_scope = "all" if show_all_priorities else "focus"
     else:
         default_priorities = priority_values
+        priority_scope = "all"
 
     priority_filter_key = (
         f"prioridad_filter_"
         f"{st.session_state.get('view_mode', 'desconocida')}_"
-        f"{priority_mode}"
+        f"{priority_mode}_"
+        f"{priority_scope}"
     )
 
     prioridades = st.sidebar.multiselect(
@@ -313,6 +312,18 @@ def _human_source(source: object) -> str:
     return sources.get(source, str(source or "desconocida"))
 
 
+def _format_int(value: object) -> str:
+    if value is None or pd.isna(value):
+        return "-"
+    return f"{int(value):,}".replace(",", ".")
+
+
+def _format_float(value: object, decimals: int = 1) -> str:
+    if value is None or pd.isna(value):
+        return "-"
+    return f"{float(value):.{decimals}f}"
+
+
 def render_runtime_notices(data: dict) -> None:
     health = load_api_health()
     source = data.get("source")
@@ -321,11 +332,7 @@ def render_runtime_notices(data: dict) -> None:
         st.sidebar.error("API no disponible. Se está usando fallback local si existe.")
         return
 
-    st.sidebar.success("API disponible")
-
-    if source == "postgis":
-        st.sidebar.success("Datos operativos desde PostGIS")
-    elif source == "csv":
+    if source == "csv":
         st.sidebar.warning("API disponible, pero el ranking viene de CSV.")
     elif source == "local":
         st.sidebar.warning("Usando fallback local; revisar API/autenticación.")
@@ -338,7 +345,7 @@ def render_pipeline_status() -> None:
     state = data.get("state", {}) if isinstance(data, dict) else {}
     summary = data.get("ranking_summary", {}) if isinstance(data, dict) else {}
 
-    st.subheader("Estado operativo del pipeline")
+    st.subheader("Pipeline")
 
     if not data.get("exists"):
         if data.get("source") == "api_unavailable":
@@ -351,47 +358,44 @@ def render_pipeline_status() -> None:
     failed = bool(state.get("failed", False))
     if failed:
         status_label = "Error"
-        st.error("La última ejecución del pipeline terminó con error.")
+        status_message = "La última ejecución del pipeline terminó con error."
+        st.error(status_message)
     elif skipped:
         status_label = "Sin actualización"
-        st.info("La última ejecución no recalculó ranking porque no encontró una imagen válida nueva.")
+        status_message = "Sin imagen Sentinel nueva; no se recalculó ranking."
+        st.info(status_message)
     else:
         status_label = "Actualizado"
-        st.success("La última ejecución generó o cargó ranking operativo.")
+        status_message = "La última ejecución generó o cargó ranking operativo."
+        st.success(status_message)
 
     reason = state.get("reason")
+    latest_date = (
+        state.get("fecha_dataset")
+        or state.get("fecha_rankeada")
+        or summary.get("fecha_ranking")
+    )
 
-    cols = st.columns(5)
-    cols[0].metric("Estado última corrida", status_label)
+    cols = st.columns(4)
+    cols[0].metric("Estado", status_label)
     cols[1].metric("Última ejecución", _format_datetime_value(state.get("last_run_utc")))
-    cols[2].metric(
-        "Última imagen válida",
-        _format_state_value(
-            state.get("fecha_dataset")
-            or state.get("fecha_rankeada")
-            or summary.get("fecha_ranking")
-        ),
-    )
-    cols[3].metric(
-        "PostGIS cargado",
-        _format_state_value(state.get("postgis_loaded")),
-    )
-    cols[4].metric("Resultado", _human_pipeline_reason(reason))
+    cols[2].metric("Última imagen válida", _format_state_value(latest_date))
+    cols[3].metric("Modo", _format_state_value(state.get("mode")))
 
-    detail_cols = st.columns(4)
-    detail_cols[0].metric(
-        "Parcelas ranking",
-        f"{int(summary.get('rows', state.get('parcelas', 0))):,}".replace(",", "."),
+    details = pd.DataFrame(
+        [
+            {
+                "Resultado": _human_pipeline_reason(reason),
+                "PostGIS cargado": _format_state_value(state.get("postgis_loaded")),
+                "Fecha antes": _format_state_value(state.get("fecha_dataset_antes")),
+                "Fecha después": _format_state_value(state.get("fecha_dataset_despues")),
+                "Filas ranking": _format_int(summary.get("rows", state.get("parcelas", 0))),
+                "Evaluadas": _format_int(summary.get("evaluadas")),
+                "Sin ranking": _format_int(summary.get("sin_ranking")),
+            }
+        ]
     )
-    detail_cols[1].metric(
-        "Fecha antes",
-        _format_state_value(state.get("fecha_dataset_antes")),
-    )
-    detail_cols[2].metric(
-        "Fecha después",
-        _format_state_value(state.get("fecha_dataset_despues")),
-    )
-    detail_cols[3].metric("Modo", _format_state_value(state.get("mode")))
+    st.dataframe(details, hide_index=True, width="stretch")
 
     if summary.get("exists"):
         st.caption(
@@ -405,15 +409,61 @@ def render_pipeline_status() -> None:
         st.caption(f"Log: {state['log_path']}")
 
 
+def render_admin_overview(df: pd.DataFrame) -> None:
+    priority_col = "prioridad_visual" if "prioridad_visual" in df.columns else "prioridad"
+    ranked = df[df["ranking_global"].notna()].copy()
+    total = len(df)
+    evaluated = len(ranked)
+    critical = int((df[priority_col] == "critica").sum())
+    high = int((df[priority_col] == "alta").sum())
+    high_critical = critical + high
+    coverage = evaluated / total * 100 if total else 0
+    score_mean = df["prioridad_score"].mean() if "prioridad_score" in df.columns else pd.NA
+    fecha = "-"
+    if "fecha_actual" in df.columns and df["fecha_actual"].notna().any():
+        fecha = str(df["fecha_actual"].dropna().iloc[0])
+
+    cols = st.columns(4)
+    cols[0].metric("Fecha imagen", fecha)
+    cols[1].metric("Parcelas evaluadas", f"{_format_int(evaluated)} / {_format_int(total)}")
+    cols[2].metric("Alta/crítica", _format_int(high_critical))
+    cols[3].metric("Score promedio", _format_float(score_mean))
+
+    detail_cols = st.columns(4)
+    detail_cols[0].metric("Cobertura", f"{coverage:.1f}%")
+    detail_cols[1].metric("Críticas", _format_int(critical))
+    detail_cols[2].metric("Altas", _format_int(high))
+    detail_cols[3].metric(
+        "Sin ranking",
+        _format_int(int((df[priority_col] == "sin ranking").sum())),
+    )
+
+
+def render_admin_quality_summary(df: pd.DataFrame) -> None:
+    outlier_col = "outlier_especial" if "outlier_especial" in df.columns else "outlier_espacial"
+    outliers = int(df.get(outlier_col, pd.Series(dtype=bool)).fillna(False).astype(bool).sum())
+    baja_confianza = int((df.get("confianza_lectura", pd.Series(dtype=str)) == "baja").sum())
+    score_smoothed = int(df.get("score_suavizado", pd.Series(dtype=bool)).fillna(False).astype(bool).sum())
+
+    cols = st.columns(3)
+    cols[0].metric("Casos a revisar", _format_int(outliers))
+    cols[1].metric("Confianza baja", _format_int(baja_confianza))
+    cols[2].metric("Scores suavizados", _format_int(score_smoothed))
+
+
 def render_admin_status_tab(df: pd.DataFrame, filtered: pd.DataFrame) -> None:
     st.subheader("Estado general")
-    render_metrics(df, admin_mode=True)
+    render_admin_overview(df)
 
     st.divider()
     render_pipeline_status()
 
     st.divider()
-    st.subheader("Vista activa")
+    st.subheader("Calidad de lectura")
+    render_admin_quality_summary(df)
+
+    st.divider()
+    st.subheader("Vista activa filtrada")
 
     col1, col2, col3, col4 = st.columns(4)
 
@@ -526,7 +576,10 @@ def render_map_tab(
     left, right = st.columns([2.2, 1.0])
 
     with left:
-        if not admin_mode and selected_cliente_id is not None:
+        if admin_mode:
+            map_center, map_zoom = bbox_center_zoom(filtered_data)
+            map_zoom = min(map_zoom + 0.45, 10.0)
+        elif selected_cliente_id is not None:
             map_center, map_zoom = bbox_center_zoom(filtered_data)
         else:
             map_center, map_zoom = None, 8.3
@@ -590,316 +643,15 @@ def render_data_tab(filtered: pd.DataFrame, admin_mode: bool) -> None:
     st.dataframe(table_df, hide_index=True, width="stretch")
 
 
-def render_available_parcels_tab() -> None:
-    st.subheader("Parcelas disponibles")
-    st.caption("Parcelas activas cuyo cultivo operativo todavía no es vid ni olivo.")
-
-    limit = st.number_input(
-        "Cantidad máxima a cargar en el mapa",
-        min_value=100,
-        max_value=20000,
-        value=3000,
-        step=500,
-    )
-
-    loading = render_fullscreen_loader("Cargando parcelas disponibles...")
-    with st.spinner("Cargando parcelas disponibles..."):
-        data = load_admin_parcelas_disponibles(limit=int(limit))
-    loading.empty()
-    df = features_to_frame(data)
-
-    if df.empty:
-        st.info("No hay parcelas disponibles o la API no está disponible.")
-        return
-
-    st.caption(
-        f"Fuente: {data.get('source', 'desconocida')} · "
-        f"Mostrando {len(df):,} parcelas".replace(",", ".")
-    )
-
-    col_map, col_detail = st.columns([2.2, 1.0])
-
-    with col_map:
-        color_by = st.selectbox(
-            "Color",
-            ["cultivo_original", "cultivo_oficial", "fuente"],
-            index=0,
-            key="available_color_by",
-        )
-
-        selected_id = st.session_state.get("selected_disponible_id")
-
-        clicked_id = render_map(
-            data,
-            df,
-            color_by=color_by,
-            center=None,
-            zoom=8.3,
-            selected_id=selected_id,
-            admin_mode=True,
-            map_key="available_parcels_map",
-        )
-
-        if clicked_id is not None:
-            st.session_state["selected_disponible_id"] = clicked_id
-
-    with col_detail:
-        st.subheader("Activación")
-
-        selected_id = st.session_state.get("selected_disponible_id")
-
-        if selected_id is None:
-            selected_id = int(df.iloc[0]["parcela_id"])
-            st.session_state["selected_disponible_id"] = selected_id
-
-        row = df[df["parcela_id"].astype(int) == int(selected_id)]
-
-        if row.empty:
-            st.info("Seleccioná una parcela disponible en el mapa.")
-            return
-
-        item = row.iloc[0]
-
-        st.write(f"Parcela {int(item['parcela_id'])}")
-        st.write(f"Cultivo original: {item.get('cultivo_original', '-')}")
-        st.write(f"Área: {item.get('area_m2', 0):.0f} m²" if pd.notna(item.get("area_m2")) else "Área: -")
-
-        clientes_data = load_clientes()
-        clientes_items = clientes_data.get("items", [])
-
-        cliente_options = [None] + [int(cliente["cliente_id"]) for cliente in clientes_items]
-
-        cliente_labels = {None: "Sin asignar"}
-        cliente_labels.update(
-            {
-                int(cliente["cliente_id"]): f"{cliente['nombre']} · {cliente['tipo']}"
-                for cliente in clientes_items
-            }
-        )
-
-        with st.form("activar_parcela_disponible"):
-            cultivo_destino = st.radio("Nuevo cultivo operativo", ["vid", "olivo"], horizontal=True)
-
-            cliente_id = st.selectbox(
-                "Asignar productor",
-                cliente_options,
-                format_func=lambda value: cliente_labels.get(value, str(value)),
-            )
-
-            etiqueta = st.text_input("Etiqueta interna", value="")
-            submitted = st.form_submit_button("Activar parcela")
-
-        if submitted:
-            try:
-                activar_parcela_disponible(
-                    parcela_id=int(item["parcela_id"]),
-                    cultivo_oficial=cultivo_destino,
-                    cliente_id=cliente_id,
-                    etiqueta=etiqueta or None,
-                )
-            except Exception as exc:
-                st.error(f"No se pudo activar la parcela: {exc}")
-            else:
-                st.success("Parcela activada. Entrará al universo objetivo PostGIS.")
-                st.session_state.pop("selected_disponible_id", None)
-                st.rerun()
-
-
-def _productor_options() -> tuple[list[int | None], dict[int | None, str]]:
-    clientes_data = load_clientes()
-    clientes_items = clientes_data.get("items", [])
-
-    options: list[int | None] = [None]
-    labels: dict[int | None, str] = {None: "Sin asignar"}
-
-    for cliente in clientes_items:
-        cliente_id = int(cliente["cliente_id"])
-        options.append(cliente_id)
-        labels[cliente_id] = (
-            f"{cliente['nombre']} · {cliente['tipo']} · "
-            f"{int(cliente.get('parcelas_asignadas', 0))} parcelas"
-        )
-
-    return options, labels
-
-
-def render_users_tab() -> None:
-    st.subheader("Usuarios")
-    st.caption("Alta y mantenimiento de accesos. Roles operativos: admin, regional y productor.")
-
-    data = load_admin_usuarios(limit=5000)
-    users = pd.DataFrame(data.get("items", []))
-
-    st.caption(f"Fuente: {data.get('source', 'desconocida')} · {len(users)} usuarios")
-
-    if not users.empty:
-        visible_cols = [
-            "usuario_id",
-            "email",
-            "nombre",
-            "rol",
-            "productor_nombre",
-            "cliente_id",
-            "activo",
-            "last_login_at",
-        ]
-        visible_cols = [col for col in visible_cols if col in users.columns]
-        st.dataframe(users[visible_cols], hide_index=True, width="stretch")
-    else:
-        st.info("No hay usuarios cargados o la API no está disponible.")
-
-    productor_options, productor_labels = _productor_options()
-
-    col_create, col_edit = st.columns(2)
-
-    with col_create:
-        st.subheader("Nuevo usuario")
-
-        with st.form("create_usuario_form"):
-            email = st.text_input("Usuario/email", key="new_user_email")
-            nombre = st.text_input("Nombre", key="new_user_nombre")
-            rol = st.selectbox("Rol", ["productor", "regional", "admin"], key="new_user_rol")
-
-            cliente_id = None
-            if rol == "productor":
-                cliente_id = st.selectbox(
-                    "Productor/campo asociado",
-                    productor_options,
-                    format_func=lambda value: productor_labels.get(value, str(value)),
-                    key="new_user_cliente_id",
-                )
-
-            password = st.text_input("Contraseña inicial", type="password", key="new_user_password")
-            activo = st.checkbox("Activo", value=True, key="new_user_activo")
-
-            submitted = st.form_submit_button("Crear usuario")
-
-        if submitted:
-            try:
-                payload = {
-                    "email": email,
-                    "nombre": nombre or None,
-                    "rol": rol,
-                    "cliente_id": cliente_id,
-                    "password": password,
-                    "activo": activo,
-                }
-                create_usuario(payload)
-            except Exception as exc:
-                st.error(f"No se pudo crear el usuario: {exc}")
-            else:
-                st.success("Usuario creado.")
-                st.rerun()
-
-    with col_edit:
-        st.subheader("Editar usuario")
-
-        if users.empty:
-            st.info("No hay usuarios para editar.")
-            return
-
-        user_ids = [int(value) for value in users["usuario_id"].dropna().tolist()]
-
-        selected_user_id = st.selectbox(
-            "Usuario",
-            user_ids,
-            format_func=lambda uid: str(
-                users.loc[users["usuario_id"].astype(int) == int(uid), "email"].iloc[0]
-            ),
-            key="edit_user_id",
-        )
-
-        selected = users[users["usuario_id"].astype(int) == int(selected_user_id)].iloc[0]
-
-        current_rol = (
-            selected.get("rol")
-            if selected.get("rol") in ["productor", "regional", "admin"]
-            else "productor"
-        )
-
-        with st.form("edit_usuario_form"):
-            email = st.text_input(
-                "Usuario/email",
-                value=str(selected.get("email") or ""),
-                key="edit_user_email",
-            )
-
-            nombre = st.text_input(
-                "Nombre",
-                value=str(selected.get("nombre") or ""),
-                key="edit_user_nombre",
-            )
-
-            rol = st.selectbox(
-                "Rol",
-                ["productor", "regional", "admin"],
-                index=["productor", "regional", "admin"].index(current_rol),
-                key="edit_user_rol",
-            )
-
-            cliente_id = None
-            if rol == "productor":
-                current_cliente = selected.get("cliente_id")
-                current_cliente = int(current_cliente) if pd.notna(current_cliente) else None
-
-                index = (
-                    productor_options.index(current_cliente)
-                    if current_cliente in productor_options
-                    else 0
-                )
-
-                cliente_id = st.selectbox(
-                    "Productor/campo asociado",
-                    productor_options,
-                    index=index,
-                    format_func=lambda value: productor_labels.get(value, str(value)),
-                    key="edit_user_cliente_id",
-                )
-
-            password = st.text_input(
-                "Nueva contraseña",
-                type="password",
-                help="Dejar vacío para conservar la actual.",
-                key="edit_user_password",
-            )
-
-            activo = st.checkbox(
-                "Activo",
-                value=bool(selected.get("activo", True)),
-                key="edit_user_activo",
-            )
-
-            submitted = st.form_submit_button("Guardar cambios")
-
-        if submitted:
-            try:
-                payload = {
-                    "email": email,
-                    "nombre": nombre or None,
-                    "rol": rol,
-                    "cliente_id": cliente_id,
-                    "activo": activo,
-                }
-
-                if password:
-                    payload["password"] = password
-
-                update_usuario(int(selected_user_id), payload)
-            except Exception as exc:
-                st.error(f"No se pudo actualizar el usuario: {exc}")
-            else:
-                st.success("Usuario actualizado.")
-                st.rerun()
-
-
-def render_admin_management_area() -> None:
-    tab_usuarios, tab_parcelas = st.tabs(["Usuarios", "Parcelas y asignación"])
-
-    with tab_usuarios:
-        render_users_tab()
-
-    with tab_parcelas:
-        render_available_parcels_tab()
+def refresh_dashboard_data() -> None:
+    st.cache_data.clear()
+    for key in [
+        "selected_parcela_id",
+        "selected_disponible_id",
+        "prev_priority_context",
+    ]:
+        st.session_state.pop(key, None)
+    st.rerun()
 
 
 def render_admin_analysis_area(
@@ -974,6 +726,8 @@ def render_dashboard() -> None:
                 label_visibility="collapsed",
                 key="admin_area",
             )
+            if st.button("Actualizar datos", width="stretch"):
+                refresh_dashboard_data()
     else:
         st.title("Ranking hídrico de parcelas")
         st.caption("San Rafael, Mendoza · Vid y olivo")

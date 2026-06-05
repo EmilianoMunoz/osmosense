@@ -10,17 +10,17 @@ class RankingsApiHandlersTest(unittest.TestCase):
         self.assertEqual(main.health(), {"status": "ok"})
 
     def test_auth_login_handler_delegates_to_service(self):
-        payload = main.LoginRequest(email="admin", password="admin123")
+        payload = main.LoginRequest(email="admin@smosense.local", password="admin123")
         expected = {
             "source": "postgis",
             "token_type": "bearer",
             "access_token": "token",
-            "user": {"email": "admin", "view_mode": "Admin"},
+            "user": {"email": "admin@smosense.local", "view_mode": "Admin"},
         }
         with patch.object(main, "authenticate_user", return_value=expected) as mocked:
             result = main.post_auth_login(payload)
 
-        mocked.assert_called_once_with("admin", "admin123")
+        mocked.assert_called_once_with("admin@smosense.local", "admin123")
         self.assertEqual(result, expected)
 
     def test_latest_ranking_handler(self):
@@ -152,10 +152,11 @@ class RankingsApiHandlersTest(unittest.TestCase):
 
     def test_admin_create_usuario_handler_delegates_to_service(self):
         payload = main.UsuarioCreate(
-            email="productor",
-            nombre="Productor demo",
+            email="productor.demo@smosense.local",
+            nombre="Productor",
+            apellido="Demo",
+            dni="30111222",
             rol="productor",
-            cliente_id=1,
             password="cliente123",
         )
         expected = {"source": "postgis", "item": {"usuario_id": 1}}
@@ -164,10 +165,12 @@ class RankingsApiHandlersTest(unittest.TestCase):
 
         mocked.assert_called_once_with(
             {
-                "email": "productor",
-                "nombre": "Productor demo",
+                "email": "productor.demo@smosense.local",
+                "nombre": "Productor",
+                "apellido": "Demo",
+                "dni": "30111222",
                 "rol": "productor",
-                "cliente_id": 1,
+                "cliente_id": None,
                 "password": "cliente123",
                 "activo": True,
             }

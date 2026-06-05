@@ -101,6 +101,8 @@ def _clean_user(row: dict[str, Any]) -> dict[str, Any]:
         "usuario_id": int(row["usuario_id"]),
         "email": row["email"],
         "nombre": row.get("nombre"),
+        "apellido": row.get("apellido"),
+        "dni": row.get("dni"),
         "rol": rol,
         "cliente_id": int(row["cliente_id"]) if row.get("cliente_id") is not None else None,
         "view_mode": _role_to_view(rol),
@@ -114,6 +116,8 @@ def create_access_token(user: dict[str, Any]) -> str:
         "sub": str(user["usuario_id"]),
         "email": user["email"],
         "nombre": user.get("nombre"),
+        "apellido": user.get("apellido"),
+        "dni": user.get("dni"),
         "rol": rol,
         "cliente_id": user.get("cliente_id"),
         "view_mode": user.get("view_mode") or _role_to_view(rol),
@@ -155,6 +159,8 @@ def verify_access_token(token: str) -> dict[str, Any]:
         "usuario_id": int(payload["sub"]),
         "email": payload["email"],
         "nombre": payload.get("nombre"),
+        "apellido": payload.get("apellido"),
+        "dni": payload.get("dni"),
         "rol": rol,
         "cliente_id": (
             int(payload["cliente_id"]) if payload.get("cliente_id") is not None else None
@@ -173,7 +179,7 @@ def authenticate_user(email: str, password: str) -> dict[str, Any]:
 
     normalized_email = email.strip().lower()
     query = """
-        SELECT usuario_id, email, nombre, rol, cliente_id, password_hash
+        SELECT usuario_id, email, nombre, apellido, dni, rol, cliente_id, password_hash
         FROM usuarios
         WHERE lower(email) = %s
           AND activo = true

@@ -33,19 +33,19 @@ Primera carga completa:
 
 El dashboard abre primero una pantalla de login. Si la API está disponible, las
 credenciales se validan contra la tabla `usuarios` de PostGIS vía
-`POST /auth/login`. Si la API no está disponible, se conserva fallback demo para
-desarrollo.
+`POST /auth/login`. Los accesos rápidos también usan ese login real; no generan
+sesión demo ni evitan los permisos de la API.
 
-Usuarios demo:
+Usuarios disponibles para desarrollo local:
 
-| Usuario    | Contraseña    | Vista         |
-|------------|---------------|---------------|
-| `admin`    | `admin123`    | Admin         |
-| `finca`    | `cliente123`  | Productor vid |
-| `olivar`   | `cliente123`  | Productor olivo |
-| `regional` | `regional123` | Regional      |
+| Email | Contraseña | Vista |
+|---|---|---|
+| `admin@smosense.local` | `admin123` | Admin |
+| `productor.vid@smosense.local` | `cliente123` | Productor vid |
+| `productor.olivo@smosense.local` | `cliente123` | Productor olivo |
+| `regional@smosense.local` | `regional123` | Regional |
 
-La pantalla conserva accesos rápidos para desarrollo:
+La pantalla conserva accesos rápidos PostGIS:
 
 ```text
 Productor vid
@@ -87,7 +87,7 @@ Responsabilidades:
 | Archivo                                  | Responsabilidad                                   |
 |------------------------------------------|---------------------------------------------------|
 | `streamlit_app.py`                       | Entrypoint mínimo.                                |
-| `frontend/auth.py`                       | Login, logout y sesión demo.                      |
+| `frontend/auth.py`                       | Login, logout y sesión PostGIS.                   |
 | `frontend/data.py`                       | Carga desde API/local y normalización a DataFrame.|
 | `frontend/logic.py`                      | Prioridad dinámica, selección de valores visibles y reglas puras. |
 | `frontend/map.py`                        | Mapa, zoom, hover y selección de parcela.         |
@@ -206,7 +206,7 @@ backend/data/clientes/clientes.csv
 backend/data/clientes/cliente_parcela.csv
 ```
 
-Clientes demo actuales:
+Productores de desarrollo actuales:
 
 ```text
 Finca Demo Norte: parcelas vecinas de vid

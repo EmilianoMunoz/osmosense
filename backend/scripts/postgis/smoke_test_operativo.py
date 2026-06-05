@@ -114,7 +114,7 @@ def run_api_checks(api_url: str, expected_source: str, timeout: float) -> None:
     auth = post_json(
         api_url,
         "/auth/login",
-        {"email": "admin", "password": "admin123"},
+        {"email": "admin@smosense.local", "password": "admin123"},
         timeout,
     )
     check(auth.get("source") == "postgis", "/auth/login no usa source=postgis")

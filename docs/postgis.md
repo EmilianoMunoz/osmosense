@@ -207,7 +207,9 @@ Roles soportados:
 | `productor`           | Productor       | Sí               |
 | `regional`            | Regional        | No               |
 
-Cargar o actualizar usuarios demo:
+Cargar usuarios operativos de desarrollo. El script elimina los usuarios
+existentes y recrea los accesos base; no modifica `clientes` ni
+`cliente_parcela`, por lo que conserva las parcelas asignadas a cada campo:
 
 ```bash
 venv/bin/python backend/scripts/postgis/cargar_usuarios_demo_postgis.py
@@ -215,12 +217,12 @@ venv/bin/python backend/scripts/postgis/cargar_usuarios_demo_postgis.py
 
 Usuarios cargados:
 
-| Login      | Contraseña    | Rol                  |
-|------------|---------------|----------------------|
-| `admin`    | `admin123`    | `admin`              |
-| `finca`    | `cliente123`  | `productor`          |
-| `olivar`   | `cliente123`  | `productor`          |
-| `regional` | `regional123` | `regional`           |
+| Email | Contraseña | Rol |
+|---|---|---|
+| `admin@smosense.local` | `admin123` | `admin` |
+| `productor.vid@smosense.local` | `cliente123` | `productor` |
+| `productor.olivo@smosense.local` | `cliente123` | `productor` |
+| `regional@smosense.local` | `regional123` | `regional` |
 
 El endpoint de login es:
 

@@ -97,7 +97,7 @@ POST /auth/login
 Body:
 
 ```json
-{"email": "admin", "password": "admin123"}
+{"email": "admin@smosense.local", "password": "admin123"}
 ```
 
 Valida contra la tabla `usuarios` de PostGIS y devuelve el rol operativo para
@@ -119,8 +119,10 @@ Respuesta:
   "access_token": "...",
   "user": {
     "usuario_id": 1,
-    "email": "admin",
+    "email": "admin@smosense.local",
     "nombre": "Administrador",
+    "apellido": null,
+    "dni": null,
     "rol": "admin",
     "cliente_id": null,
     "view_mode": "Admin"
@@ -258,10 +260,12 @@ Payload:
 
 ```json
 {
-  "email": "finca",
-  "nombre": "Finca Demo Norte",
+  "email": "productor.vid@smosense.local",
+  "nombre": "Martín",
+  "apellido": "Videla",
+  "dni": "30111222",
   "rol": "productor",
-  "cliente_id": 1,
+  "cliente_id": null,
   "password": "cliente123",
   "activo": true
 }

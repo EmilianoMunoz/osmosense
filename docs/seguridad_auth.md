@@ -1,8 +1,8 @@
 # Seguridad, Login y Control de Acceso
 
 Este documento describe el esquema actual de autenticación y autorización del
-sistema. Cubre el login real contra PostGIS, los accesos demo de desarrollo, el
-token de sesión y la separación de vistas por rol.
+sistema. Cubre el login real contra PostGIS, los accesos rápidos de desarrollo,
+el token de sesión y la separación de vistas por rol.
 
 ## Estado Actual
 
@@ -93,8 +93,10 @@ Si el login es exitoso, la respuesta tiene esta forma:
   "access_token": "...",
   "user": {
     "usuario_id": 1,
-    "email": "admin",
+    "email": "admin@smosense.local",
     "nombre": "Administrador",
+    "apellido": null,
+    "dni": null,
     "rol": "admin",
     "cliente_id": null,
     "view_mode": "Admin"
@@ -146,8 +148,10 @@ El payload incluye:
 | Campo | Descripción |
 |---|---|
 | `sub` | `usuario_id` |
-| `email` | Usuario/email |
+| `email` | Email de acceso |
 | `nombre` | Nombre visible |
+| `apellido` | Apellido, si fue cargado |
+| `dni` | DNI, si fue cargado |
 | `rol` | `admin`, `regional` o `productor` |
 | `cliente_id` | Productor/campo asociado, si aplica |
 | `view_mode` | Vista inicial sugerida |
@@ -275,7 +279,7 @@ Campos principales:
 | `auth_label` | Nombre visible. |
 | `auth_rol` | Rol operativo. |
 | `auth_cliente_id` | Productor asociado, si aplica. |
-| `auth_source` | `postgis`, `demo` o local. |
+| `auth_source` | Fuente de autenticación, normalmente `postgis`. |
 | `auth_token` | Token bearer para llamadas a API. |
 | `view_mode` | Vista activa: Admin, Regional o Productor. |
 
@@ -306,7 +310,7 @@ Reglas:
 - `productor`: solo ve `Productor`;
 - sesión no autenticada: pantalla de login.
 
-## Accesos Demo
+## Accesos Rápidos PostGIS
 
 El login tiene botones rápidos para desarrollo:
 
@@ -317,24 +321,21 @@ Admin
 Regional
 ```
 
-Estos botones usan:
+Estos botones usan las mismas credenciales que se podrían escribir manualmente y
+llaman a:
 
-```python
-login_as(DEMO_USERS["..."])
+```text
+POST /auth/login
 ```
 
-Importante:
+Por lo tanto:
 
-- no llaman a `/auth/login`;
-- no generan token real;
-- dejan `auth_source = "demo"`;
-- no deben considerarse autenticación productiva.
+- generan token real;
+- dejan `auth_source = "postgis"`;
+- respetan permisos por rol;
+- fallan si la API o PostGIS no están disponibles.
 
-Si se entra con demo, algunos endpoints protegidos no pueden responder porque no
-hay bearer token. En ese caso el frontend puede usar fallback local si existe.
-
-Para probar el flujo real PostGIS hay que escribir usuario y contraseña en el
-formulario de login.
+Esto permite probar rápido perfiles distintos sin volver al modo demo.
 
 ## Fallback Local
 
@@ -351,8 +352,8 @@ load_cliente_geojson_local()
 load_zonificacion_san_rafael()
 ```
 
-Esto sirve para desarrollo y demo local, pero en producción debe verificarse que
-la fuente sea `postgis`.
+Esto sirve para desarrollo local, pero en producción debe verificarse que la
+fuente sea `postgis`.
 
 El dashboard muestra avisos de fuente:
 
@@ -389,7 +390,7 @@ venv/bin/python -m pytest tests/test_auth.py tests/test_api_handlers.py -q
 - El token no es JWT estándar.
 - No hay refresh token.
 - No hay revocación de token en servidor.
-- Los accesos demo siguen disponibles para desarrollo.
+- Los accesos rápidos dependen de usuarios reales en PostGIS.
 - `AUTH_SECRET` debe configurarse explícitamente en producción.
 - El fallback local es útil para desarrollo, pero puede ocultar problemas de API
   si no se revisa la fuente mostrada.
@@ -401,7 +402,7 @@ Antes de producción conviene:
 
 1. Migrar el token propio a JWT estándar o documentar formalmente la decisión de mantener HMAC propio.
 2. Definir `AUTH_SECRET` fuerte en `.env`/secrets de cloud.
-3. Desactivar accesos demo o protegerlos detrás de una variable de entorno.
+3. Mantener accesos rápidos solo si apuntan a usuarios reales controlados.
 4. Exigir HTTPS en el entorno cloud.
 5. Agregar política de rotación de contraseñas si el alcance del producto lo requiere.
 6. Registrar intentos de login fallidos.

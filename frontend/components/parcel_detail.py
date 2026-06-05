@@ -196,7 +196,13 @@ def render_client_parcel_summary(row: pd.Series) -> None:
 
     tendencia = row.get("tendencia_reciente_5d")
     if pd.notna(tendencia):
-        st.write(f"Tendencia reciente estimada: {tendencia:.1f} puntos por imagen.")
+        tendencia = float(tendencia)
+        if tendencia > 2:
+            st.write("El riesgo viene aumentando en las últimas imágenes.")
+        elif tendencia < -2:
+            st.write("El riesgo viene bajando en las últimas imágenes.")
+        else:
+            st.write("El riesgo reciente se mantiene estable.")
 
     delta_10d = display_delta(row, 10, admin_mode=False)
     if pd.notna(delta_10d):
@@ -206,9 +212,6 @@ def render_client_parcel_summary(row: pd.Series) -> None:
             st.write("La serie proyectada indica una posible reducción del estrés hídrico en los próximos 10 días.")
         else:
             st.write("La serie proyectada se mantiene relativamente estable en los próximos 10 días.")
-
-    st.markdown("**Historial satelital reciente**")
-    render_parcela_history(row, admin_mode=False)
 
 
 if hasattr(st, "dialog"):

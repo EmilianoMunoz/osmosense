@@ -94,6 +94,26 @@ def fetch_clientes_from_api(base_url: str, token: str | None) -> dict[str, Any] 
 
 
 @st.cache_data(show_spinner=False)
+def fetch_admin_clientes_from_api(
+    base_url: str,
+    token: str | None,
+    limit: int | None = None,
+) -> dict[str, Any] | None:
+    try:
+        params = {"limit": limit} if limit else None
+        response = requests.get(
+            f"{base_url}/admin/clientes",
+            params=params,
+            headers=auth_headers(token),
+            timeout=8,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException:
+        return None
+
+
+@st.cache_data(show_spinner=False)
 def fetch_cliente_geojson_from_api(
     base_url: str,
     cliente_id: int,
@@ -168,6 +188,47 @@ def load_admin_usuarios(limit: int | None = 5000, activo: bool | None = None) ->
     return data
 
 
+def load_admin_clientes(limit: int | None = 5000) -> dict[str, Any]:
+    data = fetch_admin_clientes_from_api(
+        api_base_url(),
+        auth_token(),
+        limit=limit,
+    )
+    if data is None:
+        return {"source": "api_unavailable", "count": 0, "items": []}
+    return data
+
+
+def api_error_message(exc: Exception) -> str:
+    if not isinstance(exc, requests.HTTPError) or exc.response is None:
+        return str(exc)
+
+    response = exc.response
+    try:
+        payload = response.json()
+    except ValueError:
+        return str(exc)
+
+    detail = payload.get("detail")
+    if isinstance(detail, str):
+        return detail
+
+    if isinstance(detail, list):
+        messages = []
+        for item in detail:
+            if not isinstance(item, dict):
+                messages.append(str(item))
+                continue
+            loc = item.get("loc", [])
+            field = str(loc[-1]) if loc else "campo"
+            msg = item.get("msg", "valor inválido")
+            messages.append(f"{field}: {msg}")
+        if messages:
+            return "; ".join(messages)
+
+    return str(exc)
+
+
 def create_usuario(payload: dict[str, Any]) -> dict[str, Any]:
     response = requests.post(
         f"{api_base_url()}/admin/usuarios",
@@ -189,6 +250,33 @@ def update_usuario(usuario_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     )
     response.raise_for_status()
     fetch_admin_usuarios_from_api.clear()
+    return response.json()
+
+
+def create_cliente(payload: dict[str, Any]) -> dict[str, Any]:
+    response = requests.post(
+        f"{api_base_url()}/admin/clientes",
+        json=payload,
+        headers=auth_headers(),
+        timeout=10,
+    )
+    response.raise_for_status()
+    fetch_admin_clientes_from_api.clear()
+    fetch_clientes_from_api.clear()
+    return response.json()
+
+
+def update_cliente(cliente_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    response = requests.put(
+        f"{api_base_url()}/admin/clientes/{int(cliente_id)}",
+        json=payload,
+        headers=auth_headers(),
+        timeout=10,
+    )
+    response.raise_for_status()
+    fetch_admin_clientes_from_api.clear()
+    fetch_clientes_from_api.clear()
+    fetch_cliente_geojson_from_api.clear()
     return response.json()
 
 

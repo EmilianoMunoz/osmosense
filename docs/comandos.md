@@ -2,6 +2,11 @@
 
 Hoja rápida de comandos actuales después de mover el backend a `backend/`.
 
+Para una validacion paso a paso del flujo completo, ver
+[`docs/checklist_operativo.md`](checklist_operativo.md).
+
+Para detalle de la suite de pruebas, ver [`docs/tests.md`](tests.md).
+
 ## Stack Local
 
 Levantar todo:

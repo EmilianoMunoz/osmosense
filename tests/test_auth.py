@@ -18,7 +18,7 @@ class AuthServiceTest(unittest.TestCase):
     def test_access_token_roundtrip(self):
         user = {
             "usuario_id": 1,
-            "email": "admin",
+            "email": "admin@smosense.local",
             "nombre": "Administrador",
             "rol": "admin",
             "cliente_id": None,
@@ -49,7 +49,7 @@ class AuthApiDependencyTest(unittest.TestCase):
     def test_current_user_accepts_valid_token(self):
         user = {
             "usuario_id": 1,
-            "email": "admin",
+            "email": "admin@smosense.local",
             "nombre": "Administrador",
             "rol": "admin",
             "cliente_id": None,
@@ -60,7 +60,7 @@ class AuthApiDependencyTest(unittest.TestCase):
             result = main.current_user(f"Bearer {token}")
 
         self.assertEqual(result["rol"], "admin")
-        self.assertEqual(result["email"], "admin")
+        self.assertEqual(result["email"], "admin@smosense.local")
 
     def test_require_roles_allows_expected_role(self):
         dependency = main.require_roles("admin")

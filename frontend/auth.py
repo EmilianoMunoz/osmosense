@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 import requests
@@ -10,8 +11,11 @@ from dotenv import load_dotenv
 from frontend.components.branding import render_logo, render_sidebar_logo
 
 
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
 @dataclass(frozen=True)
-class DemoUser:
+class QuickLoginUser:
     username: str
     password: str
     label: str
@@ -20,32 +24,32 @@ class DemoUser:
     cliente_id: int | None = None
 
 
-DEMO_USERS = {
-    "admin": DemoUser(
-        username="admin",
+QUICK_LOGIN_USERS = {
+    "admin": QuickLoginUser(
+        username="admin@smosense.local",
         password="admin123",
         label="Administrador",
         view_mode="Admin",
         rol="admin",
     ),
-    "finca": DemoUser(
-        username="finca",
+    "finca": QuickLoginUser(
+        username="productor.vid@smosense.local",
         password="cliente123",
         label="Finca Demo Norte",
         view_mode="Productor",
         rol="productor",
         cliente_id=1,
     ),
-    "olivar": DemoUser(
-        username="olivar",
+    "olivar": QuickLoginUser(
+        username="productor.olivo@smosense.local",
         password="cliente123",
         label="Olivar Demo Este",
         view_mode="Productor",
         rol="productor",
         cliente_id=2,
     ),
-    "regional": DemoUser(
-        username="regional",
+    "regional": QuickLoginUser(
+        username="regional@smosense.local",
         password="regional123",
         label="Regional DGI",
         view_mode="Regional",
@@ -63,22 +67,12 @@ def is_authenticated() -> bool:
     return bool(st.session_state.get("authenticated", False))
 
 
-def login_as(user: DemoUser) -> None:
-    st.session_state["authenticated"] = True
-    st.session_state["auth_user"] = user.username
-    st.session_state["auth_label"] = user.label
-    st.session_state["view_mode"] = user.view_mode
-    st.session_state["auth_cliente_id"] = user.cliente_id
-    st.session_state["auth_rol"] = user.rol
-    st.session_state["auth_source"] = "demo"
-    st.session_state.pop("auth_token", None)
-    st.session_state.pop("selected_parcela_id", None)
-
-
 def login_from_api(username: str, password: str) -> tuple[bool, str | None, bool]:
     login = username.strip().lower()
     if not login or not password:
-        return False, "Ingrese usuario y contraseña.", True
+        return False, "Ingrese email y contraseña.", True
+    if not EMAIL_RE.match(login):
+        return False, "Ingrese un email válido.", True
 
     try:
         response = requests.post(
@@ -108,6 +102,18 @@ def login_from_api(username: str, password: str) -> tuple[bool, str | None, bool
     st.session_state["auth_token"] = payload.get("access_token")
     st.session_state.pop("selected_parcela_id", None)
     return True, None, True
+
+
+def login_quick_user(key: str) -> None:
+    user = QUICK_LOGIN_USERS[key]
+    ok, message, api_available = login_from_api(user.username, user.password)
+    if ok:
+        st.rerun()
+
+    if not api_available:
+        st.error("API/PostGIS no disponible. Los accesos rápidos usan login real.")
+    else:
+        st.error(message or "No se pudo iniciar sesión con el acceso rápido.")
 
 
 def logout() -> None:
@@ -154,7 +160,7 @@ def render_login() -> None:
             margin-bottom: 1.5rem;
         }
 
-        .demo-title {
+        .quick-title {
             text-align: center;
             font-size: 1rem;
             font-weight: 600;
@@ -162,7 +168,7 @@ def render_login() -> None:
             margin-bottom: 0.25rem;
         }
 
-        .demo-caption {
+        .quick-caption {
             text-align: center;
             opacity: 0.70;
             font-size: 0.85rem;
@@ -210,8 +216,8 @@ def render_login() -> None:
 
             with st.form("login_form"):
                 username = st.text_input(
-                    "Usuario",
-                    placeholder="Ingrese su usuario",
+                    "Email",
+                    placeholder="usuario@dominio.com",
                 )
 
                 password = st.text_input(
@@ -232,19 +238,15 @@ def render_login() -> None:
                     st.rerun()
 
                 if not api_available:
-                    user = DEMO_USERS.get(username.strip().lower())
-                    if user is not None and password == user.password:
-                        login_as(user)
-                        st.rerun()
-                    message = "API no disponible. Se intentó fallback demo y las credenciales no coinciden."
+                    message = "API/PostGIS no disponible. No se inició sesión."
 
                 st.error(message or "Usuario o contraseña inválidos.")
 
             st.markdown(
                 """
-                <div class="demo-title">Accesos rápidos</div>
-                <div class="demo-caption">
-                    Entorno de desarrollo para probar distintos perfiles del dashboard.
+                <div class="quick-title">Accesos rápidos PostGIS</div>
+                <div class="quick-caption">
+                    Inician sesión contra la API real usando usuarios cargados en PostGIS.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -254,26 +256,22 @@ def render_login() -> None:
 
             with c1:
                 if st.button("Productor vid", width="stretch"):
-                    login_as(DEMO_USERS["finca"])
-                    st.rerun()
+                    login_quick_user("finca")
 
                 if st.button("Admin", width="stretch"):
-                    login_as(DEMO_USERS["admin"])
-                    st.rerun()
+                    login_quick_user("admin")
 
             with c2:
                 if st.button("Productor olivo", width="stretch"):
-                    login_as(DEMO_USERS["olivar"])
-                    st.rerun()
+                    login_quick_user("olivar")
 
                 if st.button("Regional", width="stretch"):
-                    login_as(DEMO_USERS["regional"])
-                    st.rerun()
+                    login_quick_user("regional")
 
             st.markdown(
                 """
                 <div class="credentials-caption">
-                    Demo: admin/admin123 · finca/cliente123 · olivar/cliente123 · regional/regional123
+                    Usuarios PostGIS: admin@smosense.local/admin123 · productor.vid@smosense.local/cliente123 · productor.olivo@smosense.local/cliente123 · regional@smosense.local/regional123
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -286,17 +284,11 @@ def render_auth_sidebar() -> None:
     role = st.session_state.get("auth_rol")
     render_sidebar_logo()
     st.sidebar.header("Sesión")
-    if source == "postgis":
-        st.sidebar.success("Sesión PostGIS")
-    elif source == "demo":
-        st.sidebar.warning("Sesión demo")
-    else:
+    if source and source != "postgis":
         st.sidebar.info("Sesión local")
     st.sidebar.caption(f"Usuario: {label}")
     if role:
         st.sidebar.caption(f"Rol: {role}")
-    if source == "demo":
-        st.sidebar.caption("Modo desarrollo: no usa token ni permisos reales de API.")
     if st.sidebar.button("Cerrar sesión", width="stretch"):
         logout()
         st.rerun()

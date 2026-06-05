@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from backend.app.services.auth import database_url, hash_password, normalize_role
 
 
 VALID_ROLES = {"admin", "regional", "productor"}
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _db_url() -> str:
@@ -17,6 +19,12 @@ def _db_url() -> str:
 
 def _validate_role_payload(data: dict[str, Any], current: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = data.copy()
+    if "email" in payload and payload["email"] is not None:
+        email = str(payload["email"]).strip().lower()
+        if not EMAIL_RE.match(email):
+            raise ValueError("El email no tiene un formato válido.")
+        payload["email"] = email
+
     if "rol" in payload and payload["rol"] is not None:
         payload["rol"] = normalize_role(str(payload["rol"]))
         if payload["rol"] not in VALID_ROLES:
@@ -29,9 +37,6 @@ def _validate_role_payload(data: dict[str, Any], current: dict[str, Any] | None 
     cliente_id = payload.get("cliente_id")
     if cliente_id is None and current is not None and "cliente_id" not in payload:
         cliente_id = current.get("cliente_id")
-
-    if rol == "productor" and cliente_id is None:
-        raise ValueError("El rol productor requiere un productor/campo asociado.")
 
     if rol in {"admin", "regional"}:
         payload["cliente_id"] = None
@@ -70,6 +75,8 @@ def admin_usuarios(limit: int | None = None, activo: bool | None = None) -> dict
             u.usuario_id,
             u.email,
             u.nombre,
+            u.apellido,
+            u.dni,
             u.rol,
             u.cliente_id,
             c.nombre AS productor_nombre,
@@ -106,17 +113,21 @@ def admin_create_usuario(data: dict[str, Any]) -> dict[str, Any]:
         INSERT INTO usuarios (
             email,
             nombre,
+            apellido,
+            dni,
             rol,
             cliente_id,
             password_hash,
             activo,
             updated_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, now())
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
         RETURNING
             usuario_id,
             email,
             nombre,
+            apellido,
+            dni,
             rol,
             cliente_id,
             activo,
@@ -127,6 +138,8 @@ def admin_create_usuario(data: dict[str, Any]) -> dict[str, Any]:
     params = [
         str(payload["email"]).strip().lower(),
         payload.get("nombre"),
+        payload.get("apellido"),
+        payload.get("dni"),
         payload["rol"],
         payload.get("cliente_id"),
         hash_password(str(password)),
@@ -165,7 +178,7 @@ def admin_update_usuario(usuario_id: int, data: dict[str, Any]) -> dict[str, Any
                     raise ValueError("Usuario no encontrado.")
 
                 payload = _validate_role_payload(data, dict(current))
-                allowed = ["email", "nombre", "rol", "cliente_id", "activo"]
+                allowed = ["email", "nombre", "apellido", "dni", "rol", "cliente_id", "activo"]
                 assignments = []
                 params: list[Any] = []
                 for field in allowed:
@@ -195,6 +208,8 @@ def admin_update_usuario(usuario_id: int, data: dict[str, Any]) -> dict[str, Any
                         usuario_id,
                         email,
                         nombre,
+                        apellido,
+                        dni,
                         rol,
                         cliente_id,
                         activo,

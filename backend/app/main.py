@@ -94,15 +94,17 @@ class ParcelaDisponibleActivar(BaseModel):
 class LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    email: str = Field(min_length=1)
+    email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     password: str = Field(min_length=1)
 
 
 class UsuarioCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    email: str = Field(min_length=1)
-    nombre: str | None = None
+    email: str = Field(pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    nombre: str = Field(min_length=1)
+    apellido: str | None = None
+    dni: str | None = None
     rol: str = Field(pattern="^(admin|regional|productor)$")
     cliente_id: int | None = Field(default=None, ge=1)
     password: str = Field(min_length=6)
@@ -112,8 +114,10 @@ class UsuarioCreate(BaseModel):
 class UsuarioUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    email: str | None = Field(default=None, min_length=1)
-    nombre: str | None = None
+    email: str | None = Field(default=None, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    nombre: str | None = Field(default=None, min_length=1)
+    apellido: str | None = None
+    dni: str | None = None
     rol: str | None = Field(default=None, pattern="^(admin|regional|productor)$")
     cliente_id: int | None = Field(default=None, ge=1)
     password: str | None = Field(default=None, min_length=6)

@@ -254,12 +254,6 @@ def render_regional_detail(row: pd.Series) -> None:
     )
 
 
-if hasattr(st, "dialog"):
-    @st.dialog("Detalle regional")
-    def render_regional_dialog(row_dict: dict[str, Any]) -> None:
-        render_regional_detail(pd.Series(row_dict))
-
-
 def render_regional_side_panel(df: pd.DataFrame) -> None:
     st.subheader("UM seleccionada")
     selected_id = st.session_state.get("selected_um_id")
@@ -614,8 +608,6 @@ def render_regional_view() -> None:
     st.sidebar.caption(f"Fuente regional: {source}")
     if not health.get("available"):
         st.sidebar.error("API no disponible. Se usa fallback local si existe.")
-    elif source == "postgis":
-        st.sidebar.success("Datos regionales desde PostGIS")
     elif source in {"csv", "local"}:
         st.sidebar.warning("Datos regionales desde fallback local/CSV.")
 
@@ -637,9 +629,6 @@ def render_regional_view() -> None:
             )
             if clicked_id is not None:
                 st.session_state["selected_um_id"] = clicked_id
-                row = filtered[filtered["zona_id"] == clicked_id]
-                if not row.empty and hasattr(st, "dialog"):
-                    render_regional_dialog(row.iloc[0].to_dict())
         with right:
             render_regional_side_panel(filtered)
     with tab_datos:
