@@ -209,7 +209,10 @@ predicciones crudas `riesgo_pred_*`.
 
 - pestañas en orden: `Mapa`, `Resumen`, `Parcelas`;
 - aviso superior con la fecha de `Ranking operativo usado`, para aclarar que la
-  vista usa la última lectura satelital con cobertura suficiente;
+  vista usa el último ranking con cobertura suficiente;
+- métricas separadas para `Ranking operativo` y `Lectura satelital`: la primera
+  es la fecha objetivo del ranking, la segunda es la imagen/observación efectiva
+  usada para calcular las parcelas;
 - mapa limitado a parcelas asociadas al productor como primera vista;
 - slider bajo el mapa para visualizar riesgo actual, proyección 5 días y
   proyección 10 días;

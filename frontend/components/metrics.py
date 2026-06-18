@@ -4,18 +4,32 @@ import pandas as pd
 import streamlit as st
 
 
+def _format_date(value: object) -> str:
+    if value is None or pd.isna(value):
+        return "-"
+    try:
+        return pd.to_datetime(value).strftime("%d/%m/%Y")
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def render_metrics(df: pd.DataFrame, admin_mode: bool = True) -> None:
     priority_col = "prioridad_visual" if "prioridad_visual" in df.columns else "prioridad"
     criticas = int((df[priority_col] == "critica").sum())
     alta = int((df[priority_col] == "alta").sum())
     riesgo_prom = float(df["prioridad_score"].mean()) if not df.empty else 0.0
-    fecha = df["fecha_actual"].iloc[0] if "fecha_actual" in df.columns and not df.empty else "-"
+    if "fecha_ranking" in df.columns and df["fecha_ranking"].notna().any():
+        fecha = _format_date(df["fecha_ranking"].dropna().iloc[0])
+    elif "fecha_actual" in df.columns and df["fecha_actual"].notna().any():
+        fecha = _format_date(df["fecha_actual"].dropna().iloc[0])
+    else:
+        fecha = "-"
     rankeadas = int(df["ranking_global"].notna().sum()) if "ranking_global" in df.columns else 0
     sin_ranking = int((df[priority_col] == "sin ranking").sum())
     top_score = df["prioridad_score"].max() if "prioridad_score" in df.columns else pd.NA
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Fecha imagen", fecha)
+    col1.metric("Ranking operativo", fecha)
     col2.metric("Parcelas", f"{len(df):,}".replace(",", "."))
     col3.metric("Prioridad crítica", criticas)
     col4.metric("Score promedio", f"{riesgo_prom:.1f}")
@@ -45,9 +59,14 @@ def render_metrics(df: pd.DataFrame, admin_mode: bool = True) -> None:
 def render_client_metrics(df: pd.DataFrame) -> None:
     priority_col = "prioridad_visual" if "prioridad_visual" in df.columns else "prioridad"
     ranked = df[df["ranking_global"].notna()].copy()
-    fecha = df["fecha_actual"].dropna().iloc[0] if "fecha_actual" in df.columns and df["fecha_actual"].notna().any() else "-"
+    if "fecha_ranking" in df.columns and df["fecha_ranking"].notna().any():
+        fecha = _format_date(df["fecha_ranking"].dropna().iloc[0])
+    elif "fecha_actual" in df.columns and df["fecha_actual"].notna().any():
+        fecha = _format_date(df["fecha_actual"].dropna().iloc[0])
+    else:
+        fecha = "-"
     latest_reading = (
-        df["fecha_lectura"].dropna().max()
+        _format_date(df["fecha_lectura"].dropna().max())
         if "fecha_lectura" in df.columns and df["fecha_lectura"].notna().any()
         else "-"
     )
@@ -55,7 +74,7 @@ def render_client_metrics(df: pd.DataFrame) -> None:
     riesgo_max = ranked["riesgo_actual"].max() if not ranked.empty else pd.NA
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Fecha objetivo", fecha)
+    col1.metric("Ranking operativo", fecha)
     col2.metric("Parcelas evaluadas", f"{len(ranked):,}".replace(",", "."))
     col3.metric("Atención crítica", int((df[priority_col] == "critica").sum()))
     col4.metric("Atención alta", int((df[priority_col] == "alta").sum()))
@@ -63,5 +82,5 @@ def render_client_metrics(df: pd.DataFrame) -> None:
     col5, col6, col7, col8 = st.columns(4)
     col5.metric("Señal promedio", f"{riesgo_prom:.1f}")
     col6.metric("Señal más alta", f"{riesgo_max:.1f}" if pd.notna(riesgo_max) else "-")
-    col7.metric("Última lectura", latest_reading)
+    col7.metric("Lectura satelital", latest_reading)
     col8.metric("Sin ranking", int((df[priority_col] == "sin ranking").sum()))

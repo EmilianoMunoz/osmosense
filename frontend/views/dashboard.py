@@ -66,7 +66,7 @@ def render_operational_ranking_notice(df: pd.DataFrame) -> None:
     fecha = _format_dashboard_date(df["fecha_ranking"].dropna().iloc[0])
     st.caption(
         "Ranking operativo usado: "
-        f"{fecha}. La vista utiliza la última lectura satelital con cobertura suficiente."
+        f"{fecha}. La vista utiliza el último ranking con cobertura suficiente."
     )
 
 
