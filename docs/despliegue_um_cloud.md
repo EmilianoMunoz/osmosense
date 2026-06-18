@@ -159,6 +159,24 @@ Opcion B: PostGIS administrado o externo:
 
 ## 5. Cargar datos iniciales
 
+Antes de cargar PostGIS, copiar a la VM los artefactos operativos que no se
+versionan en Git. Paquete mínimo:
+
+```text
+backend/data/parcelas/san_rafael_completo_wgs84.geojson
+backend/data/parcelas/san_rafael_vid_olivo_wgs84.geojson
+backend/data/rankings/ranking_hidrico_latest.csv
+backend/data/clientes/clientes.csv
+backend/data/clientes/cliente_parcela.csv
+backend/data/zonificacion/regional_dgi_san_rafael.geojson
+backend/data/zonificacion/um_con_cultivos.geojson
+backend/data/zonificacion/parcelas_um.csv
+backend/data/zonificacion/ranking_um_latest.csv
+backend/data/limites/san_rafael.geojson
+backend/models/ranking_hidrico_config.json
+backend/models/hidrico_regresion/
+```
+
 Primera carga operativa:
 
 ```bash
@@ -343,6 +361,10 @@ La unit `osmosense-postgis-backup.timer` ejecuta `pg_dump` diario y guarda:
 ```text
 backend/data/backups/postgis/estres_YYYYMMDD_HHMMSS.sql.gz
 ```
+
+Cuando PostGIS corre en Docker, el backup usa `pg_dump` dentro del contenedor
+`estres-postgis`. Esto evita errores por diferencia de versiones entre el
+cliente `pg_dump` instalado en Ubuntu y el servidor PostgreSQL del contenedor.
 
 Ese directorio debe quedar fuera de Git y, en produccion, copiarse
 periodicamente a almacenamiento externo o volumen persistente.
