@@ -47,7 +47,9 @@ Define:
 | `parcelas`                   | Geometría oficial de parcelas, cultivo oficial y área.    |
 | `observaciones_sentinel`     | Serie temporal de índices Sentinel-2 por parcela y fecha. |
 | `ranking_hidrico`            | Resultado de cada corrida del modelo predictor.           |
-| `ranking_hidrico_latest`     | Último ranking disponible.                                |
+| `ranking_hidrico_cobertura_fechas` | Cobertura de parcelas rankeadas por fecha.         |
+| `ranking_hidrico_latest_date` | Última fecha con cobertura suficiente para uso operativo. |
+| `ranking_hidrico_latest`     | Ranking operativo latest, filtrado por cobertura mínima.  |
 | `ranking_hidrico_latest_geo` | Último ranking unido con geometría para mapa.             |
 | `clientes`                   | Perfil interno productor/cartera de parcelas. Conserva nombre legacy. |
 | `usuarios`                   | Login operativo y rol del usuario.                        |
@@ -313,6 +315,20 @@ FROM ranking_hidrico_latest_geo;
 ```
 
 Contiene ranking, prioridad, predicciones y geometría `geom`.
+
+La selección de `latest` no usa solamente `max(fecha_ranking)`. Para evitar que
+una imagen Sentinel parcial reemplace una corrida completa, el schema calcula
+primero la cobertura por fecha en `ranking_hidrico_cobertura_fechas`.
+
+Criterio operativo:
+
+```text
+parcelas objetivo = parcelas activas vid/olivo con area_m2 >= 4000
+fecha latest válida = fecha más reciente con al menos 80% de cobertura
+```
+
+Esto permite conservar rankings parciales en `ranking_hidrico` para auditoría,
+pero evita que alimenten el dashboard como fecha operativa principal.
 ## Zonificación Regional UM
 
 El schema contempla la vista regional con tres tablas:

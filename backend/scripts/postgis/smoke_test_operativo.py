@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 
 DEFAULT_API_URL = "http://127.0.0.1:8000"
 DEFAULT_DATABASE_URL = "postgresql://estres:estres_dev@127.0.0.1:5433/estres"
+DEFAULT_ADMIN_EMAIL = "admin@osmosense.local"
+DEFAULT_ADMIN_PASSWORD = "admin123"
 
 
 class SmokeError(RuntimeError):
@@ -18,10 +20,19 @@ class SmokeError(RuntimeError):
 
 
 def parse_args() -> argparse.Namespace:
+    load_dotenv()
     parser = argparse.ArgumentParser(
         description="Smoke test operativo para API, PostGIS y fallback local."
     )
     parser.add_argument("--api-url", default=None, help="URL base de FastAPI.")
+    parser.add_argument(
+        "--admin-email",
+        default=os.getenv("OSMOSENSE_ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL),
+    )
+    parser.add_argument(
+        "--admin-password",
+        default=os.getenv("OSMOSENSE_ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD),
+    )
     parser.add_argument(
         "--require-source",
         choices=["any", "csv", "postgis"],
@@ -104,7 +115,13 @@ def assert_items(data: dict[str, Any], path: str) -> list[dict[str, Any]]:
     return items
 
 
-def run_api_checks(api_url: str, expected_source: str, timeout: float) -> None:
+def run_api_checks(
+    api_url: str,
+    expected_source: str,
+    timeout: float,
+    admin_email: str,
+    admin_password: str,
+) -> None:
     print(f"API: {api_url}")
 
     health = get_json(api_url, "/health", timeout)
@@ -114,7 +131,7 @@ def run_api_checks(api_url: str, expected_source: str, timeout: float) -> None:
     auth = post_json(
         api_url,
         "/auth/login",
-        {"email": "admin@osmosense.local", "password": "admin123"},
+        {"email": admin_email, "password": admin_password},
         timeout,
     )
     check(auth.get("source") == "postgis", "/auth/login no usa source=postgis")
@@ -283,7 +300,13 @@ def main() -> int:
     args = parse_args()
     try:
         if not args.skip_api:
-            run_api_checks(base_url(args.api_url), args.require_source, args.timeout)
+            run_api_checks(
+                base_url(args.api_url),
+                args.require_source,
+                args.timeout,
+                args.admin_email,
+                args.admin_password,
+            )
         if args.check_postgis:
             run_postgis_checks(database_url(args.database_url))
         if args.check_local_fallback:

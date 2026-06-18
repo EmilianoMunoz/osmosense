@@ -2242,6 +2242,18 @@ Validaciones reales en cloud:
   `backend/data/backups/postgis/estres_20260618_162731.sql.gz`, tamaño
   aproximado `9.1M`.
 
+Corrección posterior:
+
+- la corrida `2026-06-13` cubrió solo parte de San Rafael, por lo que no debe
+  reemplazar automáticamente al ranking operativo completo;
+- `ranking_hidrico_latest` dejó de usar solo `max(fecha_ranking)`;
+- se agregó `ranking_hidrico_cobertura_fechas` y
+  `ranking_hidrico_latest_date`;
+- una fecha nueva solo se considera `latest` si cubre al menos el `80%` de las
+  parcelas objetivo vid/olivo activas con `area_m2 >= 4000`;
+- `ranking_um_latest` queda alineado con la misma fecha operativa que el
+  ranking parcelario.
+
 ## Decisiones Descartadas O Resumidas
 
 Se eliminaron de este documento los detalles extensos de:

@@ -18,10 +18,17 @@ class SmokeError(RuntimeError):
 
 
 def parse_args() -> argparse.Namespace:
+    load_dotenv()
     parser = argparse.ArgumentParser(description="Smoke test no destructivo del flujo regional.")
     parser.add_argument("--api-url", default=None, help="URL base de FastAPI.")
-    parser.add_argument("--regional-email", default=DEFAULT_REGIONAL_EMAIL)
-    parser.add_argument("--regional-password", default=DEFAULT_REGIONAL_PASSWORD)
+    parser.add_argument(
+        "--regional-email",
+        default=os.getenv("OSMOSENSE_REGIONAL_EMAIL", DEFAULT_REGIONAL_EMAIL),
+    )
+    parser.add_argument(
+        "--regional-password",
+        default=os.getenv("OSMOSENSE_REGIONAL_PASSWORD", DEFAULT_REGIONAL_PASSWORD),
+    )
     parser.add_argument("--timeout", type=float, default=10.0)
     return parser.parse_args()
 

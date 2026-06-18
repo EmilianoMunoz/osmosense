@@ -137,13 +137,40 @@ CREATE INDEX IF NOT EXISTS idx_ranking_hidrico_fecha_prioridad
 CREATE INDEX IF NOT EXISTS idx_ranking_hidrico_cultivo_fecha
     ON ranking_hidrico (cultivo, fecha_ranking, ranking_por_cultivo);
 
+CREATE OR REPLACE VIEW ranking_hidrico_cobertura_fechas AS
+WITH objetivo AS (
+    SELECT count(*)::double precision AS parcelas_objetivo
+    FROM parcelas
+    WHERE activo = true
+      AND lower(cultivo_oficial) IN ('vid', 'olivo')
+      AND COALESCE(area_m2, 0) >= 4000
+),
+cobertura AS (
+    SELECT
+        fecha_ranking,
+        count(*)::double precision AS parcelas_rankeadas
+    FROM ranking_hidrico
+    GROUP BY fecha_ranking
+)
+SELECT
+    c.fecha_ranking,
+    c.parcelas_rankeadas::bigint AS parcelas_rankeadas,
+    o.parcelas_objetivo::bigint AS parcelas_objetivo,
+    c.parcelas_rankeadas / NULLIF(o.parcelas_objetivo, 0) AS cobertura_ratio,
+    c.parcelas_rankeadas >= GREATEST(o.parcelas_objetivo * 0.80, 1) AS elegible_latest
+FROM cobertura c
+CROSS JOIN objetivo o;
+
+CREATE OR REPLACE VIEW ranking_hidrico_latest_date AS
+SELECT max(fecha_ranking) AS fecha_ranking
+FROM ranking_hidrico_cobertura_fechas
+WHERE elegible_latest = true;
+
 CREATE OR REPLACE VIEW ranking_hidrico_latest AS
 SELECT r.*
 FROM ranking_hidrico r
-WHERE r.fecha_ranking = (
-    SELECT max(fecha_ranking)
-    FROM ranking_hidrico
-);
+JOIN ranking_hidrico_latest_date d
+    ON d.fecha_ranking = r.fecha_ranking;
 
 CREATE OR REPLACE VIEW ranking_hidrico_latest_geo AS
 SELECT
@@ -343,10 +370,8 @@ CREATE INDEX IF NOT EXISTS idx_ranking_um_fecha_ranking
 CREATE OR REPLACE VIEW ranking_um_latest AS
 SELECT r.*
 FROM ranking_um r
-WHERE r.fecha_ranking = (
-    SELECT max(fecha_ranking)
-    FROM ranking_um
-);
+JOIN ranking_hidrico_latest_date d
+    ON d.fecha_ranking = r.fecha_ranking;
 
 CREATE OR REPLACE VIEW ranking_um_latest_geo AS
 SELECT

@@ -129,6 +129,28 @@ Ejecutar cuando se modifica:
 venv/bin/python -m pytest tests/test_cloud_maintenance.py -q
 ```
 
+### `tests/test_smoke_credentials.py`
+
+Valida que los smoke tests lean credenciales rotadas desde variables de entorno.
+
+Cubre:
+
+- `OSMOSENSE_ADMIN_EMAIL` y `OSMOSENSE_ADMIN_PASSWORD`;
+- `OSMOSENSE_PRODUCTOR_EMAIL` y `OSMOSENSE_PRODUCTOR_PASSWORD`;
+- `OSMOSENSE_REGIONAL_EMAIL` y `OSMOSENSE_REGIONAL_PASSWORD`;
+- compatibilidad de los smoke operativo, productor, regional y CRUD.
+
+Ejecutar cuando se modifica:
+
+- `backend/scripts/postgis/smoke_test_operativo.py`;
+- `backend/scripts/postgis/smoke_test_productor.py`;
+- `backend/scripts/postgis/smoke_test_regional.py`;
+- `backend/scripts/postgis/smoke_test_crud_productor.py`.
+
+```bash
+venv/bin/python -m pytest tests/test_smoke_credentials.py -q
+```
+
 ### `tests/test_map_animation.py`
 
 Valida la animacion del mapa de productor.
@@ -246,6 +268,17 @@ venv/bin/python -m pytest tests/test_cnn_temporal_classifier.py -q
 ## Smoke test operativo
 
 Los tests anteriores son unitarios o de handlers con mocks. Para validar el flujo con API/PostGIS se usa smoke test:
+
+En cloud, si las credenciales demo fueron rotadas, definir:
+
+```bash
+export OSMOSENSE_ADMIN_EMAIL=admin@osmosense.local
+export OSMOSENSE_ADMIN_PASSWORD='<password-admin-rotado>'
+export OSMOSENSE_PRODUCTOR_EMAIL=productor.vid@osmosense.local
+export OSMOSENSE_PRODUCTOR_PASSWORD='<password-productor-rotado>'
+export OSMOSENSE_REGIONAL_EMAIL=regional@osmosense.local
+export OSMOSENSE_REGIONAL_PASSWORD='<password-regional-rotado>'
+```
 
 ```bash
 venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis --check-postgis

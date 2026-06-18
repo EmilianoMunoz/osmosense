@@ -337,7 +337,18 @@ journalctl -u osmosense-pipeline.service -n 200
 
 ## 9. Smoke tests post-despliegue
 
-Con API levantada:
+Con API levantada. Si las credenciales demo fueron rotadas, exportar primero:
+
+```bash
+export OSMOSENSE_ADMIN_EMAIL=admin@osmosense.local
+export OSMOSENSE_ADMIN_PASSWORD='<password-admin-rotado>'
+export OSMOSENSE_PRODUCTOR_EMAIL=productor.vid@osmosense.local
+export OSMOSENSE_PRODUCTOR_PASSWORD='<password-productor-rotado>'
+export OSMOSENSE_REGIONAL_EMAIL=regional@osmosense.local
+export OSMOSENSE_REGIONAL_PASSWORD='<password-regional-rotado>'
+```
+
+Luego ejecutar:
 
 ```bash
 API_BASE_URL=http://IP_O_DNS_DE_LA_VM:8000 venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis --check-postgis
@@ -433,8 +444,8 @@ Resultado operativo inicial:
 
 ```text
 Dashboard: http://10.201.3.193:8501
-Ranking cloud generado: 2026-06-13
-Parcelas rankeadas: 4714
+Ranking cloud parcial generado: 2026-06-13
+Parcelas rankeadas en esa corrida: 4714
 Backup valido: estres_20260618_162731.sql.gz, ~9.1M
 ```
 
@@ -443,5 +454,9 @@ Notas:
 - el acceso depende de estar conectado a la red ZeroTier de UM-Cloud;
 - no se abre PostGIS hacia la red, solo API (`8000`) y dashboard (`8501`);
 - no se registran secretos ni contraseñas en este documento;
-- los smoke tests que usan contraseñas demo viejas deben ejecutarse con
-  credenciales rotadas o ser actualizados para leer variables de entorno.
+- los smoke tests aceptan credenciales rotadas mediante variables
+  `OSMOSENSE_*`.
+- `ranking_hidrico_latest` usa una regla de cobertura: una fecha nueva solo
+  pasa a ser operativa si rankea al menos 80% de las parcelas objetivo
+  vid/olivo con `area_m2 >= 4000`. Esto evita que una imagen Sentinel parcial
+  deje medio mapa sin datos en el dashboard.

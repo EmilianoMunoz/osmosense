@@ -21,6 +21,7 @@ class SmokeError(RuntimeError):
 
 
 def parse_args() -> argparse.Namespace:
+    load_dotenv()
     parser = argparse.ArgumentParser(
         description=(
             "Smoke test mutante del CRUD productor-parcela. Asigna una parcela "
@@ -29,10 +30,22 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--api-url", default=None, help="URL base de FastAPI.")
-    parser.add_argument("--admin-email", default=DEFAULT_ADMIN_EMAIL)
-    parser.add_argument("--admin-password", default=DEFAULT_ADMIN_PASSWORD)
-    parser.add_argument("--productor-email", default=DEFAULT_PRODUCTOR_EMAIL)
-    parser.add_argument("--productor-password", default=DEFAULT_PRODUCTOR_PASSWORD)
+    parser.add_argument(
+        "--admin-email",
+        default=os.getenv("OSMOSENSE_ADMIN_EMAIL", DEFAULT_ADMIN_EMAIL),
+    )
+    parser.add_argument(
+        "--admin-password",
+        default=os.getenv("OSMOSENSE_ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD),
+    )
+    parser.add_argument(
+        "--productor-email",
+        default=os.getenv("OSMOSENSE_PRODUCTOR_EMAIL", DEFAULT_PRODUCTOR_EMAIL),
+    )
+    parser.add_argument(
+        "--productor-password",
+        default=os.getenv("OSMOSENSE_PRODUCTOR_PASSWORD", DEFAULT_PRODUCTOR_PASSWORD),
+    )
     parser.add_argument("--parcela-id", type=int, default=None, help="Parcela libre específica.")
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument(

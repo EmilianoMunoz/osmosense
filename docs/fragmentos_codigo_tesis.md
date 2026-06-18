@@ -479,41 +479,56 @@ Guardar geometria como texto o GeoJSON plano dificultaria consultas espaciales,
 indices y cruces regionales. PostGIS permite mantener integridad espacial y
 consultas geograficas reproducibles.
 
-## 14. Vista Latest Con Geometria Para El Mapa
+## 14. Vista Latest Con Control De Cobertura
 
-Fuente: `backend/sql/schema_postgis.sql`, lineas 140-157.
+Fuente: `backend/sql/schema_postgis.sql`, lineas 140-177.
 
 ```sql
+CREATE OR REPLACE VIEW ranking_hidrico_cobertura_fechas AS
+WITH objetivo AS (
+    SELECT count(*)::double precision AS parcelas_objetivo
+    FROM parcelas
+    WHERE activo = true
+      AND lower(cultivo_oficial) IN ('vid', 'olivo')
+      AND COALESCE(area_m2, 0) >= 4000
+),
+cobertura AS (
+    SELECT fecha_ranking, count(*)::double precision AS parcelas_rankeadas
+    FROM ranking_hidrico
+    GROUP BY fecha_ranking
+)
+SELECT c.fecha_ranking, c.parcelas_rankeadas::bigint AS parcelas_rankeadas,
+       o.parcelas_objetivo::bigint AS parcelas_objetivo,
+       c.parcelas_rankeadas / NULLIF(o.parcelas_objetivo, 0) AS cobertura_ratio,
+       c.parcelas_rankeadas >= GREATEST(o.parcelas_objetivo * 0.80, 1) AS elegible_latest
+FROM cobertura c
+CROSS JOIN objetivo o;
+
+CREATE OR REPLACE VIEW ranking_hidrico_latest_date AS
+SELECT max(fecha_ranking) AS fecha_ranking
+FROM ranking_hidrico_cobertura_fechas
+WHERE elegible_latest = true;
+
 CREATE OR REPLACE VIEW ranking_hidrico_latest AS
 SELECT r.*
 FROM ranking_hidrico r
-WHERE r.fecha_ranking = (
-    SELECT max(fecha_ranking)
-    FROM ranking_hidrico
-);
-
-CREATE OR REPLACE VIEW ranking_hidrico_latest_geo AS
-SELECT
-    r.*,
-    p.area_m2 AS parcela_area_m2,
-    p.cultivo_oficial,
-    p.geom
-FROM ranking_hidrico_latest r
-JOIN parcelas p
-    ON p.parcela_id = r.parcela_id
-WHERE p.activo = true;
+JOIN ranking_hidrico_latest_date d
+    ON d.fecha_ranking = r.fecha_ranking;
 ```
 
 Decision metodologica:
 
 La vista `latest` separa la persistencia historica del ranking operativo que
-consume el dashboard. La vista geoespacial une ranking y geometria activa.
+consume el dashboard, pero no acepta automaticamente cualquier fecha nueva. Una
+fecha solo se considera operativa si cubre al menos el 80% de las parcelas
+objetivo.
 
 Por que no otra alternativa:
 
-Sobrescribir una unica tabla `latest` haria perder historico. Consultar siempre
-manualmente la ultima fecha en la aplicacion duplicaria logica. La vista
-centraliza esa regla en la base.
+Usar simplemente `max(fecha_ranking)` puede hacer que una imagen Sentinel
+parcial reemplace una corrida completa y deje medio mapa sin datos. El control
+de cobertura permite conservar rankings parciales para auditoria sin usarlos
+como lectura principal del sistema.
 
 ## 15. Usuarios Y Relacion Productor-Parcela
 

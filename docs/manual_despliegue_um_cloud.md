@@ -320,6 +320,37 @@ Resultado final:
 0 fallas, 0 advertencias
 ```
 
+### 7.1. Ranking Latest Y Cobertura
+
+Durante el primer ensayo cloud se generó un ranking nuevo para `2026-06-13`
+con `4714` parcelas rankeadas. El dashboard mostraba una franja parcial del
+departamento porque la vista `ranking_hidrico_latest` tomaba simplemente la
+fecha más reciente.
+
+Corrección aplicada:
+
+```text
+ranking_hidrico_cobertura_fechas
+ranking_hidrico_latest_date
+ranking_hidrico_latest
+ranking_um_latest
+```
+
+Ahora PostGIS conserva el ranking parcial, pero solo lo usa como `latest`
+operativo si cubre al menos el `80%` de las parcelas objetivo vid/olivo con
+`area_m2 >= 4000`. Si una fecha nueva no cumple esa cobertura, el dashboard
+sigue usando la última fecha completa disponible.
+
+Consulta útil de diagnóstico:
+
+```sql
+SELECT fecha_ranking, parcelas_rankeadas, parcelas_objetivo,
+       round(cobertura_ratio::numeric, 3) AS cobertura_ratio,
+       elegible_latest
+FROM ranking_hidrico_cobertura_fechas
+ORDER BY fecha_ranking DESC;
+```
+
 ### 8. API Y Dashboard
 
 Primera prueba manual:
@@ -627,8 +658,6 @@ activo solo es necesario para acceder al dashboard o a la VM.
 
 ## Pendientes No Bloqueantes
 
-- Actualizar smoke tests para que usen credenciales rotadas por variables de
-  entorno o argumentos.
 - Copiar backups a almacenamiento externo o volumen persistente adicional.
 - Evaluar HTTPS/proxy inverso si se quiere acceso fuera de ZeroTier.
 - Reemplazar autenticación manual Earth Engine por cuenta de servicio si el

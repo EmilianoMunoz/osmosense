@@ -18,6 +18,10 @@ El proyecto ya cuenta con:
 - CRUD inicial de usuarios;
 - activación de parcelas disponibles para incorporarlas al universo operativo;
 - PostGIS local y schema geoespacial versionado;
+- despliegue validado en UM-Cloud con PostGIS Docker, API, dashboard,
+  pipeline y backup bajo `systemd`;
+- ranking cloud generado para `2026-06-13`;
+- backup PostGIS validado en cloud;
 - smoke tests y tests unitarios básicos.
 
 La estructura interna todavía conserva nombres como `clientes` y `cliente_id`
@@ -40,22 +44,30 @@ productor o autoridad regional tome la decisión con su criterio.
 
 ## Camino Técnico Pendiente
 
-### 1. Automatización Cloud
+### 1. Operación Cloud
+
+Implementado:
+
+- VM `osmosense-vm` en UM-Cloud;
+- API y dashboard con `systemd`;
+- PostGIS en Docker;
+- pipeline y backup programados con timers;
+- preflight cloud con `0 fallas, 0 advertencias`;
+- acceso por ZeroTier.
 
 Pendiente:
 
-- desplegar PostGIS, API y dashboard en la cloud UM;
-- definir variables `.env` productivas;
-- configurar ejecución programada del pipeline;
-- usar `--skip-if-no-new-date` para evitar reprocesos innecesarios;
-- guardar logs por corrida y estado final del pipeline;
-- dejar health checks simples para API, DB y dashboard.
+- copiar backups a almacenamiento externo o volumen persistente adicional;
+- revisar logs de las primeras corridas automáticas;
+- evaluar HTTPS/proxy inverso si se requiere acceso fuera de ZeroTier;
+- migrar autenticación Earth Engine manual a cuenta de servicio si el proyecto
+  pasa de demo/tesis a producción formal.
 
 Criterio de listo:
 
 ```text
-Una corrida automática detecta última imagen válida, actualiza PostGIS y el
-dashboard muestra el nuevo ranking sin intervención manual.
+La VM queda operativa sin sesiones SSH abiertas y el dashboard muestra datos
+desde PostGIS.
 ```
 
 ### 2. Robustez Del Pipeline Sentinel-2
@@ -209,14 +221,13 @@ esa lectura debe tratarse con baja confianza.
 
 1. Congelar estructura actual y documentar comandos de operación.
 2. Completar tests de permisos y CRUD usuarios.
-3. Ejecutar una corrida pipeline completa latest con PostGIS local.
+3. Ejecutar una corrida pipeline completa latest en cloud.
 4. Auditar cobertura, sin ranking y outliers de esa corrida.
 5. Ajustar dashboard por rol con datos reales de la última corrida.
-6. Preparar despliegue en cloud UM.
-7. Automatizar corrida programada.
-8. Agregar monitoreo/logs.
-9. Validar con casos de campo.
-10. Recién después incorporar clima y turnos de riego.
+6. Validar la demo cloud con usuarios `admin`, `regional` y `productor`.
+7. Agregar monitoreo/logs mínimos.
+8. Validar con casos de campo.
+9. Recién después incorporar clima y turnos de riego.
 
 ## Riesgos Principales
 
