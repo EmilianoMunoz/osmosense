@@ -4,11 +4,11 @@ services:
     container_name: estres-postgis
     restart: unless-stopped
     environment:
-      POSTGRES_DB: estres
-      POSTGRES_USER: estres
-      POSTGRES_PASSWORD: estres_dev
+      POSTGRES_DB: ${POSTGRES_DB:-estres}
+      POSTGRES_USER: ${POSTGRES_USER:-estres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-estres_dev}
     ports:
-      - "5433:5432"
+      - "${POSTGIS_BIND:-127.0.0.1}:${POSTGIS_HOST_PORT:-5433}:5432"
     volumes:
       - estres_postgis_data:/var/lib/postgresql/data
     healthcheck:

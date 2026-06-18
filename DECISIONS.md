@@ -2133,8 +2133,18 @@ deployment/systemd/osmosense-pipeline.service
 deployment/systemd/osmosense-pipeline.timer
 deployment/systemd/osmosense-postgis-backup.service
 deployment/systemd/osmosense-postgis-backup.timer
+deployment/scripts/bootstrap_vm.sh
+deployment/scripts/install_systemd.sh
 docs/despliegue_um_cloud.md
 ```
+
+Uso previsto:
+
+- `deployment/scripts/bootstrap_vm.sh` prepara una VM Ubuntu luego de clonar el
+  repositorio: paquetes base, `venv`, dependencias, `.env` y usuario de
+  servicio;
+- `deployment/scripts/install_systemd.sh` instala las units `systemd` y permite
+  habilitar/arrancar API, dashboard, pipeline y backup de forma repetible.
 
 Decisiones de seguridad mínimas:
 

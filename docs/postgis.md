@@ -141,6 +141,8 @@ Levantar PostGIS local:
 docker compose -f docker-compose.postgis.yml up -d
 ```
 
+El compose publica PostGIS por defecto solo en `127.0.0.1:5433`.
+
 URL local por defecto:
 
 ```text

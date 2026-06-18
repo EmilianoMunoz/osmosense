@@ -51,6 +51,16 @@ sudo usermod -aG docker "$USER"
 
 Cerrar y volver a abrir la sesion para que el grupo `docker` aplique.
 
+Si el repositorio ya fue clonado, este paso puede automatizarse con:
+
+```bash
+deployment/scripts/bootstrap_vm.sh --install-docker
+```
+
+El script instala paquetes base, crea `venv`, instala dependencias, prepara
+`.env` si falta y crea el usuario de servicio `osmosense`. No carga datos ni
+arranca servicios.
+
 ## 2. Instalar proyecto
 
 Ruta recomendada:
@@ -62,6 +72,13 @@ git clone <URL_DEL_REPO> /opt/osmosense
 cd /opt/osmosense
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
+```
+
+Alternativa recomendada despues de clonar:
+
+```bash
+cd /opt/osmosense
+deployment/scripts/bootstrap_vm.sh --install-docker
 ```
 
 Crear usuario de servicio si se van a usar las units incluidas:
@@ -113,16 +130,25 @@ venv/bin/python backend/scripts/maintenance/run_preflight_cloud.py
 
 Opcion A: PostGIS por Docker en la VM:
 
+Configurar en `.env` una contraseña fuerte para el contenedor:
+
+```text
+POSTGRES_DB=estres
+POSTGRES_USER=estres
+POSTGRES_PASSWORD=<password-postgis-fuerte>
+POSTGIS_BIND=127.0.0.1
+POSTGIS_HOST_PORT=5433
+DATABASE_URL=postgresql://estres:<password-postgis-fuerte>@127.0.0.1:5433/estres
+```
+
+Luego levantar la base:
+
 ```bash
 docker compose -f docker-compose.postgis.yml up -d
 ```
 
-El compose local expone PostGIS en `127.0.0.1:5433` desde el host. Para este
-modo, `DATABASE_URL` puede ser:
-
-```text
-DATABASE_URL=postgresql://estres:estres_dev@127.0.0.1:5433/estres
-```
+El compose expone PostGIS solo en `127.0.0.1:5433` desde la VM. No abrir el
+puerto `5433` en el security group.
 
 Opcion B: PostGIS administrado o externo:
 
@@ -183,6 +209,26 @@ venv/bin/python backend/scripts/maintenance/run_preflight_cloud.py --check-db
 
 La VM debe poder inicializar Earth Engine con `GEE_PROJECT_ID`.
 
+Para una demo/tesis se puede autenticar manualmente desde la VM:
+
+```bash
+venv/bin/earthengine authenticate
+```
+
+El pipeline `systemd` corre con el usuario `osmosense`, por lo que las
+credenciales deben quedar disponibles en su home (`/opt/osmosense`). Si se
+autenticó con el usuario SSH, copiar las credenciales antes de instalar
+`systemd`:
+
+```bash
+mkdir -p /opt/osmosense/.config/earthengine
+cp ~/.config/earthengine/credentials /opt/osmosense/.config/earthengine/credentials
+sudo chown -R osmosense:osmosense /opt/osmosense/.config
+```
+
+Para producción formal, preferir una cuenta de servicio de GEE y credenciales
+no interactivas.
+
 Validar manualmente antes de programar el pipeline:
 
 ```bash
@@ -230,6 +276,16 @@ sudo cp deployment/systemd/osmosense-postgis-backup.service /etc/systemd/system/
 sudo cp deployment/systemd/osmosense-postgis-backup.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 ```
+
+Alternativa con script:
+
+```bash
+deployment/scripts/install_systemd.sh --chown-service-user --enable --start
+```
+
+El script copia todas las units, ejecuta `systemctl daemon-reload`, habilita
+los servicios y los arranca. Si se quiere revisar antes de iniciar, omitir
+`--start`.
 
 Activar API y dashboard:
 
