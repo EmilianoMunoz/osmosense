@@ -200,6 +200,27 @@ prioridad = sin ranking
 Esto permite que el dashboard muestre todo el universo oficial vid/olivo y no
 solo las parcelas evaluadas.
 
+### Estado del pipeline
+
+```http
+GET /pipeline/state
+```
+
+Devuelve el estado persistido de la última corrida y, cuando PostGIS está
+configurado, un bloque `ranking_coverage` calculado desde
+`ranking_hidrico_cobertura_fechas`.
+
+Ese bloque permite que el dashboard distinga:
+
+```text
+Ranking operativo usado
+Última corrida disponible
+Cobertura de la última corrida
+Motivo por el cual una fecha reciente no reemplazó el latest operativo
+```
+
+Requiere rol `admin`.
+
 ### Ranking por fecha
 
 ```http

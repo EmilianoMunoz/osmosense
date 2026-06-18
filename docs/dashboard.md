@@ -167,6 +167,9 @@ viejas.
 - en `Análisis`, selector lazy de secciones: `Estado`, `Mapa operativo`,
   `Datos`, `Cobertura`, `Revisión técnica`. Solo se renderiza la sección activa
   para evitar construir mapa y tablas pesadas en cada rerun;
+- en `Estado`, separa `Ranking operativo` de `Última corrida`: si la corrida
+  Sentinel más reciente no alcanza cobertura suficiente, se informa que fue
+  descartada para uso operativo y se conserva la última fecha confiable;
 - en `Gestión`, dos secciones principales: `Usuarios` y `Parcelas`;
 - en `Usuarios`, alta, edición, reactivación y desactivación trazable de
   accesos. Los productores requieren apellido y DNI válido;
@@ -205,6 +208,8 @@ predicciones crudas `riesgo_pred_*`.
 ### Productor
 
 - pestañas en orden: `Mapa`, `Resumen`, `Parcelas`;
+- aviso superior con la fecha de `Ranking operativo usado`, para aclarar que la
+  vista usa la última lectura satelital con cobertura suficiente;
 - mapa limitado a parcelas asociadas al productor como primera vista;
 - slider bajo el mapa para visualizar riesgo actual, proyección 5 días y
   proyección 10 días;

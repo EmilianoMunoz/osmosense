@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import pandas as pd
 import streamlit as st
 
@@ -46,6 +48,26 @@ ADMIN_ANALYSIS_SECTIONS = [
     "Cobertura",
     "Revisión técnica",
 ]
+
+
+def _format_dashboard_date(value: object) -> str:
+    if value is None or pd.isna(value):
+        return "-"
+    try:
+        return datetime.fromisoformat(str(value)).strftime("%d/%m/%Y")
+    except ValueError:
+        return str(value)
+
+
+def render_operational_ranking_notice(df: pd.DataFrame) -> None:
+    if df.empty or "fecha_ranking" not in df.columns or not df["fecha_ranking"].notna().any():
+        return
+
+    fecha = _format_dashboard_date(df["fecha_ranking"].dropna().iloc[0])
+    st.caption(
+        "Ranking operativo usado: "
+        f"{fecha}. La vista utiliza la última lectura satelital con cobertura suficiente."
+    )
 
 
 def render_coverage_tab(df: pd.DataFrame) -> None:
@@ -351,6 +373,7 @@ def render_dashboard() -> None:
         )
         return
 
+    render_operational_ranking_notice(filtered)
     render_client_metrics(filtered)
     render_client_field_status(filtered)
     tab_mapa, tab_resumen, tab_datos = st.tabs(["Mapa", "Resumen", "Parcelas"])

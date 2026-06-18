@@ -31,6 +31,22 @@ def _format_datetime_value(value: object) -> str:
         return str(value)
 
 
+def _format_date_value(value: object) -> str:
+    if value is None or value == "":
+        return "-"
+    try:
+        dt = datetime.fromisoformat(str(value))
+        return dt.strftime("%d/%m/%Y")
+    except ValueError:
+        return str(value)
+
+
+def _format_percent(value: object, decimals: int = 1) -> str:
+    if value is None or pd.isna(value):
+        return "-"
+    return f"{float(value) * 100:.{decimals}f}%"
+
+
 def _human_pipeline_reason(reason: object) -> str:
     reasons = {
         "sin_fecha_nueva": "Sin imagen Sentinel nueva",
@@ -86,6 +102,8 @@ def render_pipeline_status() -> None:
     data = load_pipeline_state()
     state = data.get("state", {}) if isinstance(data, dict) else {}
     summary = data.get("ranking_summary", {}) if isinstance(data, dict) else {}
+    coverage = data.get("ranking_coverage", {}) if isinstance(data, dict) else {}
+    latest_coverage = coverage.get("latest_detected", {}) if isinstance(coverage, dict) else {}
 
     st.subheader("Pipeline")
 
@@ -96,12 +114,21 @@ def render_pipeline_status() -> None:
             st.info("Todavía no hay estado persistido del pipeline.")
         return
 
+    coverage_status = coverage.get("status")
+    coverage_rejected = coverage_status == "ultima_fecha_descartada_por_cobertura"
     skipped = bool(state.get("skipped", False))
     failed = bool(state.get("failed", False))
     if failed:
         status_label = "Error"
         status_message = "La última ejecución del pipeline terminó con error."
         st.error(status_message)
+    elif coverage_rejected:
+        status_label = "Sin actualización operativa"
+        status_message = (
+            "La última corrida Sentinel no reemplazó el ranking operativo "
+            "porque no alcanzó la cobertura mínima."
+        )
+        st.warning(status_message)
     elif skipped:
         status_label = "Sin actualización"
         status_message = "Sin imagen Sentinel nueva; no se recalculó ranking."
@@ -117,17 +144,34 @@ def render_pipeline_status() -> None:
         or state.get("fecha_rankeada")
         or summary.get("fecha_ranking")
     )
+    operational_date = coverage.get("operational_date") or summary.get("fecha_ranking")
+    latest_detected_date = coverage.get("latest_detected_date") or latest_date
 
     cols = st.columns(4)
     cols[0].metric("Estado", status_label)
     cols[1].metric("Última ejecución", _format_datetime_value(state.get("last_run_utc")))
-    cols[2].metric("Última imagen válida", _format_state_value(latest_date))
-    cols[3].metric("Modo", _format_state_value(state.get("mode")))
+    cols[2].metric("Ranking operativo", _format_date_value(operational_date))
+    cols[3].metric("Última corrida", _format_date_value(latest_detected_date))
+
+    if coverage.get("available"):
+        if coverage_rejected:
+            st.caption(
+                "Última corrida descartada para uso operativo: "
+                f"{_format_date_value(latest_detected_date)} · "
+                f"cobertura {_format_percent(latest_coverage.get('cobertura_ratio'))} "
+                f"({_format_int(latest_coverage.get('parcelas_rankeadas'))} de "
+                f"{_format_int(latest_coverage.get('parcelas_objetivo'))} parcelas objetivo)."
+            )
+        else:
+            st.caption(
+                "El ranking operativo coincide con la última corrida con cobertura suficiente."
+            )
 
     details = pd.DataFrame(
         [
             {
                 "Resultado": _human_pipeline_reason(reason),
+                "Modo": _format_state_value(state.get("mode")),
                 "PostGIS cargado": _format_state_value(state.get("postgis_loaded")),
                 "Fecha antes": _format_state_value(state.get("fecha_dataset_antes")),
                 "Fecha después": _format_state_value(state.get("fecha_dataset_despues")),
@@ -162,11 +206,13 @@ def render_admin_overview(df: pd.DataFrame) -> None:
     coverage = evaluated / total * 100 if total else 0
     score_mean = df["prioridad_score"].mean() if "prioridad_score" in df.columns else pd.NA
     fecha = "-"
-    if "fecha_actual" in df.columns and df["fecha_actual"].notna().any():
-        fecha = str(df["fecha_actual"].dropna().iloc[0])
+    if "fecha_ranking" in df.columns and df["fecha_ranking"].notna().any():
+        fecha = _format_date_value(df["fecha_ranking"].dropna().iloc[0])
+    elif "fecha_actual" in df.columns and df["fecha_actual"].notna().any():
+        fecha = _format_date_value(df["fecha_actual"].dropna().iloc[0])
 
     cols = st.columns(4)
-    cols[0].metric("Fecha imagen", fecha)
+    cols[0].metric("Ranking operativo", fecha)
     cols[1].metric("Parcelas evaluadas", f"{_format_int(evaluated)} / {_format_int(total)}")
     cols[2].metric("Alta/crítica", _format_int(high_critical))
     cols[3].metric("Score promedio", _format_float(score_mean))
