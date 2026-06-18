@@ -2218,6 +2218,30 @@ Corrección durante despliegue UM-Cloud:
   `deployment/scripts/backup_postgis.sh` para fallar correctamente si `pg_dump`
   falla y evitar archivos `.sql.gz` vacíos.
 
+Resultado de despliegue UM-Cloud:
+
+```text
+VM: osmosense-vm
+IP interna: 10.201.3.193
+PostGIS: Docker, contenedor estres-postgis, puerto host 127.0.0.1:5433
+API: osmosense-api.service active/running
+Dashboard: osmosense-dashboard.service active/running
+Pipeline: osmosense-pipeline.timer activo
+Backup: osmosense-postgis-backup.timer activo
+Preflight: 0 fallas, 0 advertencias
+```
+
+Validaciones reales en cloud:
+
+- dashboard accesible por ZeroTier en `http://10.201.3.193:8501`;
+- login operativo contra PostGIS con credenciales rotadas;
+- pipeline con GEE/PostGIS generó ranking para `2026-06-13`;
+- ranking cloud generado: `4714` parcelas, prioridades `baja=2486`,
+  `media=1233`, `alta=681`, `critica=314`;
+- backup PostGIS válido generado:
+  `backend/data/backups/postgis/estres_20260618_162731.sql.gz`, tamaño
+  aproximado `9.1M`.
+
 ## Decisiones Descartadas O Resumidas
 
 Se eliminaron de este documento los detalles extensos de:

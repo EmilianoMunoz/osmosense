@@ -407,3 +407,41 @@ credenciales. Para exposicion mas amplia, revisar ademas:
 - backups cifrados o copiados a almacenamiento con acceso restringido;
 - usuario PostGIS no superusuario y sin acceso remoto innecesario;
 - auditoria minima de altas, bajas y asignaciones productor-parcela.
+
+## 13. Despliegue Validado
+
+Instancia usada para la demo:
+
+```text
+VM: osmosense-vm
+IP interna: 10.201.3.193
+Acceso: ZeroTier / red UM-Cloud
+PostGIS: Docker, contenedor estres-postgis, 127.0.0.1:5433
+```
+
+Estado validado:
+
+```text
+run_preflight_cloud.py --check-db -> 0 fallas, 0 advertencias
+osmosense-api.service -> active/running
+osmosense-dashboard.service -> active/running
+osmosense-pipeline.timer -> activo
+osmosense-postgis-backup.timer -> activo
+```
+
+Resultado operativo inicial:
+
+```text
+Dashboard: http://10.201.3.193:8501
+Ranking cloud generado: 2026-06-13
+Parcelas rankeadas: 4714
+Backup valido: estres_20260618_162731.sql.gz, ~9.1M
+```
+
+Notas:
+
+- el acceso depende de estar conectado a la red ZeroTier de UM-Cloud;
+- no se abre PostGIS hacia la red, solo API (`8000`) y dashboard (`8501`);
+- no se registran secretos ni contraseñas en este documento;
+- los smoke tests que usan contraseñas demo viejas deben ejecutarse con
+  credenciales rotadas o ser actualizados para leer variables de entorno.
