@@ -44,7 +44,7 @@ venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode local
 Ejecutar pipeline cloud/PostGIS:
 
 ```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date --load-postgis
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --parcel-source postgis --skip-if-no-new-date --load-postgis
 ```
 
 Aplicar schema y cargar PostGIS local:

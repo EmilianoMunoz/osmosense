@@ -459,7 +459,7 @@ extracción Sentinel, el pipeline debe ejecutarse usando parcelas objetivo desde
 PostGIS:
 
 ```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --load-postgis
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --parcel-source postgis --load-postgis
 ```
 
 ### Listar productores internos

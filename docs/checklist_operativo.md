@@ -63,7 +63,7 @@ Actualizar solo si existe una imagen Sentinel valida nueva:
 O ejecutar el pipeline directamente:
 
 ```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date --load-postgis
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --parcel-source postgis --skip-if-no-new-date --load-postgis
 ```
 
 Luego, en el dashboard admin, usar `Actualizar datos` para limpiar cache y recargar la vista.

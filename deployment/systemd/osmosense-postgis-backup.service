@@ -9,4 +9,4 @@ User=osmosense
 Group=osmosense
 WorkingDirectory=/opt/osmosense
 EnvironmentFile=/opt/osmosense/.env
-ExecStart=/bin/bash -lc 'mkdir -p /opt/osmosense/backend/data/backups/postgis && pg_dump "$DATABASE_URL" | gzip > "/opt/osmosense/backend/data/backups/postgis/estres_$(date +%%Y%%m%%d_%%H%%M%%S).sql.gz"'
+ExecStart=/opt/osmosense/deployment/scripts/backup_postgis.sh

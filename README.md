@@ -191,7 +191,7 @@ venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --
 
 Actualizando Sentinel-2/GEE usando parcelas activas desde PostGIS:
 ```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --parcel-source postgis --skip-if-no-new-date
 ```
 
 Actualizando solo una ventana reciente para análisis latest/t-5/t-10:
@@ -220,7 +220,7 @@ válida resuelta es 2026-05-31, consulta:
 
 Actualizando Sentinel-2/GEE y cargando el ranking en PostGIS:
 ```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date --load-postgis
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --parcel-source postgis --skip-if-no-new-date --load-postgis
 ```
 
 Salidas:

@@ -238,7 +238,7 @@ venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud
 Para una ejecucion real con Sentinel y carga en PostGIS:
 
 ```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date --load-postgis
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --parcel-source postgis --skip-if-no-new-date --load-postgis
 ```
 
 Si no hay imagen Sentinel valida nueva, el pipeline debe terminar sin
@@ -346,6 +346,13 @@ backend/data/backups/postgis/estres_YYYYMMDD_HHMMSS.sql.gz
 
 Ese directorio debe quedar fuera de Git y, en produccion, copiarse
 periodicamente a almacenamiento externo o volumen persistente.
+
+Un backup correcto debe pesar sustancialmente mas que unas pocas decenas de
+bytes. Si aparece un `.sql.gz` de alrededor de `20 B`, revisar:
+
+```bash
+journalctl -u osmosense-postgis-backup.service -n 120 --no-pager
+```
 
 ## 11. Criterios de listo para demo cloud
 

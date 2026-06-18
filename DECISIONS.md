@@ -2207,6 +2207,17 @@ Conclusión:
 El sistema queda listo para repetir el mismo flujo dentro de la VM UM-Cloud.
 ```
 
+Corrección durante despliegue UM-Cloud:
+
+- el servicio `osmosense-pipeline.service` debe ejecutar el pipeline con
+  `--update-recent-window` cuando usa `--parcel-source postgis`;
+- motivo: en cloud no se debe reconstruir todo el histórico desde
+  `parcelas_ide.geojson`; el flujo operativo consulta PostGIS y solo busca la
+  última ventana Sentinel válida;
+- el backup PostGIS pasó a ejecutarse mediante
+  `deployment/scripts/backup_postgis.sh` para fallar correctamente si `pg_dump`
+  falla y evitar archivos `.sql.gz` vacíos.
+
 ## Decisiones Descartadas O Resumidas
 
 Se eliminaron de este documento los detalles extensos de:

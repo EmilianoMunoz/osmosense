@@ -89,7 +89,7 @@ venv/bin/python backend/scripts/pipeline/generar_dataset_temporal_hidrico.py --a
 Desde el orquestador operativo:
 
 ```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --load-postgis
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --parcel-source postgis --load-postgis
 ```
 
 Cargar solo vid/olivo:
@@ -271,7 +271,7 @@ Authorization: Bearer <access_token>
 Cargar ranking automáticamente desde el orquestador:
 
 ```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --skip-if-no-new-date --load-postgis
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --parcel-source postgis --skip-if-no-new-date --load-postgis
 ```
 
 Pruebas sin conectarse a la DB:
