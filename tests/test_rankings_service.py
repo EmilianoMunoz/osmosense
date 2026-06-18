@@ -11,6 +11,13 @@ import backend.app.services.rankings as rankings
 
 
 class RankingsServiceTest(unittest.TestCase):
+    def setUp(self):
+        self.production_patch = patch.object(rankings, "is_production", return_value=False)
+        self.production_patch.start()
+
+    def tearDown(self):
+        self.production_patch.stop()
+
     def test_latest_ranking_from_local_csv_respects_limit(self):
         with patch.object(rankings, "database_url", return_value=None):
             result = rankings.latest_ranking(limit=2)
@@ -18,6 +25,14 @@ class RankingsServiceTest(unittest.TestCase):
         self.assertEqual(result["source"], "csv")
         self.assertEqual(result["count"], 2)
         self.assertEqual(len(result["items"]), 2)
+
+    def test_production_requires_database_url_for_operational_rankings(self):
+        with (
+            patch.object(rankings, "is_production", return_value=True),
+            patch.object(rankings, "database_url", return_value=None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "DATABASE_URL"):
+                rankings.latest_ranking(limit=2)
 
     def test_latest_geojson_from_local_files_returns_feature_collection(self):
         with patch.object(rankings, "database_url", return_value=None):
@@ -205,6 +220,22 @@ class RankingsServiceTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "fid"):
                 rankings._read_parcelas_geojson(path)
+
+    def test_admin_parcelas_sin_asignar_filters_only_active_productor_assignments(self):
+        query, params = rankings._admin_parcelas_query(
+            limit=50,
+            activo=True,
+            sin_asignar=True,
+        )
+
+        self.assertIn("p.cultivo_oficial IN ('vid', 'olivo')", query)
+        self.assertIn("r.parcela_id IS NOT NULL", query)
+        self.assertIn("NOT EXISTS", query)
+        self.assertIn("JOIN usuarios u", query)
+        self.assertIn("u.rol = 'productor'", query)
+        self.assertIn("u.activo = true", query)
+        self.assertNotIn("cp.parcela_id IS NULL", query)
+        self.assertEqual(params, [True, 50])
 
 
 if __name__ == "__main__":

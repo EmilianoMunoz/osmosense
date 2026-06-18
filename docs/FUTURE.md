@@ -21,8 +21,9 @@ El proyecto ya cuenta con:
 - smoke tests y tests unitarios básicos.
 
 La estructura interna todavía conserva nombres como `clientes` y `cliente_id`
-para representar la relación productor/campo-parcela. A nivel de producto, la
-nomenclatura vigente es `productor`.
+para compatibilidad con endpoints y datos existentes. A nivel de producto, la
+nomenclatura vigente es `productor`: un productor tiene parcelas asignadas, sin
+modelar campos como entidad funcional.
 
 ## Objetivo De Producción
 
@@ -31,7 +32,7 @@ Sentinel-2 válida nueva, actualizar rankings y exponerlos según rol:
 
 - `admin`: operación completa, auditorías, usuarios, parcelas y datos técnicos;
 - `regional`: prioridad agregada por UM/zona;
-- `productor`: solo parcelas asociadas a su campo.
+- `productor`: solo parcelas asociadas a su usuario.
 
 El producto debe mostrar detección y proyección de estrés hídrico. No debe
 recomendar riego de forma prescriptiva; debe aportar información para que el
@@ -116,9 +117,12 @@ con tendencia, cultivo y estación.
 
 Pendiente:
 
-- decidir si renombrar `clientes` a `productores` o mantener compatibilidad;
+- migrar la relación interna `cliente_id` hacia `usuario_id -> parcela` para
+  eliminar la entidad técnica `clientes` del dominio del producto;
+- mantener alias temporales para endpoints actuales mientras se migra frontend,
+  API, scripts y tests;
 - agregar migraciones incrementales en vez de depender solo de schema completo;
-- normalizar tablas de usuarios, productores/campos y relaciones parcela-campo;
+- normalizar tablas de usuarios productores y relaciones productor-parcela;
 - agregar índices para consultas frecuentes del dashboard;
 - persistir snapshots históricos de ranking y no solo latest.
 
@@ -126,7 +130,7 @@ Criterio de listo:
 
 ```text
 La base permite consultar ranking latest, histórico por fecha, parcelas por
-productor y agregados regionales con tiempos razonables.
+productor mediante `usuario_id` y agregados regionales con tiempos razonables.
 ```
 
 ### 6. Seguridad Y Roles
@@ -221,7 +225,9 @@ esa lectura debe tratarse con baja confianza.
 - dejar demasiados datos técnicos en vistas no admin;
 - depender de una imagen Sentinel-2 puntual con nubes o baja cobertura;
 - no guardar suficiente histórico para explicar cambios de ranking;
-- mezclar nombres internos `cliente_id` con concepto de producto `productor`.
+- mezclar nombres internos `cliente_id` con concepto de producto `productor`;
+- conservar durante demasiado tiempo la tabla técnica `clientes` como si fuera
+  una entidad funcional del sistema.
 
 ## Decisión Actual
 

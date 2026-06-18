@@ -309,6 +309,79 @@ legacy/app/services/
 
 Los modelos `.pkl` de clasificación fueron eliminados del flujo operativo.
 
+### Experimento TensorFlow
+
+Se agregó una prueba aislada con red neuronal TensorFlow/Keras para evaluar si
+conviene reabrir la línea de clasificación.
+
+Archivo:
+
+```text
+backend/scripts/experiments/entrenar_clasificador_tensorflow.py
+backend/scripts/experiments/entrenar_cnn_temporal_clasificacion.py
+backend/scripts/experiments/generar_dataset_clasificacion_multiclase.py
+backend/scripts/experiments/generar_dataset_clasificacion_wide.py
+```
+
+Decisiones:
+
+- no reemplaza el pipeline operativo;
+- usa `backend/data/dataset_temporal_hidrico.csv` por defecto;
+- clasifica `vid` vs `olivo` en la primera prueba;
+- valida con split por `parcela_id` para evitar fuga entre train/test;
+- guarda artefactos regenerables en `backend/models/clasificador_tensorflow/`;
+- TensorFlow queda como dependencia opcional en `requirements-tensorflow.txt`.
+
+Resultado inicial con dataset completo:
+
+```text
+split: por parcela_id
+features: 46
+accuracy argmax: 0.811
+macro F1 argmax: 0.750
+threshold optimizado: 0.38
+accuracy threshold: 0.838
+macro F1 threshold: 0.767
+olivo F1: 0.637
+vid F1: 0.896
+```
+
+Lectura:
+
+```text
+TensorFlow es viable como experimento, pero no reemplaza todavía al flujo
+operativo. Olivo sigue siendo la clase crítica a mejorar.
+```
+
+Prueba multiclase desde parcelario completo:
+
+```text
+fuente: backend/data/parcelas/san_rafael_completo_wgs84.geojson
+clases: vid, olivo, frutales, incultos, anuales
+muestra piloto: 100 parcelas por clase
+fechas Sentinel-2: 2024-01-01, 2024-03-31, 2024-06-29, 2024-09-27
+dataset temporal válido: 1741 filas
+dataset wide: 500 parcelas
+```
+
+Resultados piloto:
+
+```text
+temporal suelto: accuracy 0.391, macro F1 0.380
+wide all features: accuracy 0.450, macro F1 0.451
+wide spectral regularizado: accuracy 0.460, macro F1 0.449
+cnn temporal: accuracy 0.556, macro F1 0.553
+```
+
+Lectura:
+
+```text
+El flujo TensorFlow + GEE funciona sobre el parcelario crudo completo. La CNN
+temporal es la arquitectura neuronal más prometedora, pero la métrica piloto
+todavía no alcanza para usarla como clasificador multiclase operativo. La
+confusión principal queda entre frutales, olivo y vid.
+```
+
 ## Predictor Hídrico De Regresión
 
 Decisión vigente:
@@ -402,6 +475,33 @@ Lectura:
 - la correlación ordinal es alta;
 - el modelo sirve mejor para ranking relativo que para prometer exactitud
   absoluta parcela por parcela.
+
+Validación histórica actualizada:
+
+```text
+backend/scripts/modeling/validar_ranking_hidrico_multifecha.py
+backend/scripts/modeling/generar_reporte_validacion_predictor_hidrico.py
+docs/validacion_predictor_hidrico.md
+```
+
+Resultado sobre 26 fechas entre `2023-01-11` y `2026-05-06`:
+
+| Cultivo | Horizonte | MAE  | Spearman | Top10 overlap | Error <= 10 pts |
+|---------|-----------|------|----------|---------------|-----------------|
+| global  | 5d        | 4.08 | 0.958    | 0.835         | 92.1%           |
+| global  | 10d       | 4.66 | 0.951    | 0.817         | 88.9%           |
+| vid     | 5d        | 4.28 | 0.956    | 0.835         | 91.4%           |
+| vid     | 10d       | 5.19 | 0.942    | 0.809         | 86.4%           |
+| olivo   | 5d        | 3.66 | 0.965    | 0.864         | 93.7%           |
+| olivo   | 10d       | 3.52 | 0.971    | 0.842         | 94.2%           |
+
+Lectura vigente:
+
+- el predictor mantiene muy bien el orden relativo de parcelas;
+- el error absoluto es razonable para una herramienta de priorización;
+- otoño concentra las fechas con mayor MAE;
+- no debe comunicarse como "90% de accuracy", sino como error medio,
+  correlación de ranking y porcentaje dentro de tolerancia.
 
 ## Ranking Hídrico
 
@@ -1140,6 +1240,14 @@ usuarios
 cliente_parcela
 ```
 
+Lectura vigente:
+
+```text
+clientes/cliente_id se mantiene solo como compatibilidad interna.
+La entidad de producto es productor -> parcelas asignadas.
+No se modelan campos como entidad funcional del sistema.
+```
+
 Endpoint operativo para cliente:
 
 ```text
@@ -1148,7 +1256,7 @@ GET /clientes/{cliente_id}/rankings/latest/geojson
 
 Comportamiento:
 
-- devuelve solo parcelas asociadas al cliente;
+- devuelve solo parcelas asociadas al productor;
 - conserva parcelas sin ranking latest;
 - en PostGIS filtra por `cliente_parcela`;
 - en fallback local usa `data/clientes/clientes.csv` y
@@ -1251,24 +1359,27 @@ Decisiones vigentes:
 - selector de vista `Admin` / `Productor` / `Regional` dentro de la sesión;
 - vista productor filtrada por backend usando relación `cliente_parcela`;
 - vista productor sin pestaña de revisión técnica.
-- vista regional para validar zonificación DGI recortada a San Rafael;
+- vista regional operativa por UM DGI recortada a San Rafael;
+- vista regional con foco en UM, cobertura, composición vid/olivo, aumento
+  proyectado y concentración alta/crítica;
+- vista admin separa análisis de datos y gestión de usuarios/productores/parcelas;
+- la pestaña Productores permite asignar parcelas analizables sin productor,
+  verificar la vista resultante y desasignar parcelas;
 - la primera pantalla mantiene accesos rápidos `Productor vid`, `Productor olivo`,
   `Admin` y `Regional` para desarrollo;
-- hay dos productores demo locales en `data/clientes/`, ambos con parcelas vecinas
-  para simular campos reales.
 - la vista productor no recomienda riego; muestra detección/proyección de estrés
   para que el productor tome la decisión con su propio criterio.
 - al cambiar de productor se limpia la parcela seleccionada y el mapa se centra
-  en el campo visible.
+  en sus parcelas visibles.
 
 Usuarios demo:
 
-| Usuario  | Contraseña  | Vista         |
-|----------|-------------|---------------|
-| admin    | admin123    | Admin         |
-| finca    | cliente123  | Productor vid |
-| olivar   | cliente123  | Productor olivo |
-| regional | regional123 | Regional DGI  |
+| Email | Contraseña | Vista |
+|---|---|---|
+| admin@osmosense.local | admin123 | Admin |
+| productor.vid@osmosense.local | cliente123 | Productor vid |
+| productor.olivo@osmosense.local | cliente123 | Productor olivo |
+| regional@osmosense.local | regional123 | Regional |
 
 Refactor iniciado:
 
@@ -1279,19 +1390,21 @@ frontend/
 Separación vigente:
 
 - `streamlit_app.py`: entrypoint mínimo;
-- `frontend/auth.py`: login, logout y sesión demo;
+- `frontend/auth.py`: login, logout y sesión PostGIS;
 - `frontend/data.py`: carga API/local y normalización;
 - `frontend/logic.py`: reglas testeables;
 - `frontend/map.py`: mapa y hover;
 - `frontend/table_config.py`: columnas visibles, labels y restricciones por rol;
-- `frontend/components/client_overview.py`: estado general del campo en vista cliente;
+- `frontend/components/client_overview.py`: estado general de parcelas en vista productor;
 - `frontend/components/metrics.py`: métricas resumen;
 - `frontend/components/parcel_detail.py`: detalle y pop-up de parcela;
 - `frontend/components/tables.py`: tablas y resúmenes tabulares;
 - `frontend/components/charts.py`: gráficos;
 - `frontend/panels.py`: fachada de compatibilidad para componentes;
-- `frontend/views/dashboard.py`: composición de la vista.
-- `frontend/views/regional.py`: mapa y tabla de zonificación DGI.
+- `frontend/views/dashboard.py`: composición de la vista;
+- `frontend/views/dashboard_filters.py`: filtros y selección de vista;
+- `frontend/views/admin/`: gestión admin de usuarios, productores y parcelas;
+- `frontend/views/regional.py`: mapa, foco regional y drill-down de UM.
 
 Vista regional:
 
@@ -1459,6 +1572,8 @@ Validan:
 - admin conserva columnas técnicas y predicciones crudas;
 - las columnas visibles usan labels legibles;
 - el estado general del campo usa la proyección operativa;
+- la vista productor separa parcelas con mayor riesgo actual de parcelas con
+  mayor aumento esperado a 10 días;
 - el selector de parcela del cliente no muestra ranking ni score;
 - el hover del mapa cliente no muestra ranking, score ni campos técnicos.
 
@@ -1550,43 +1665,49 @@ docs/inventario_codigo.md
 
 ## Tests Y Verificación
 
-Tests mínimos:
+Suite vigente:
 
 ```text
-tests/test_rankings.py
+tests/test_auth.py
+tests/test_api_handlers.py
+tests/test_frontend_logic.py
+tests/test_map_animation.py
+tests/test_rankings_service.py
 ```
 
 Comando:
 
 ```bash
-venv/bin/python -m unittest discover -s tests -v
+venv/bin/python -m pytest -q
 ```
 
 Último resultado:
 
 ```text
-22 tests OK
+76 passed
 ```
 
-Verificación mínima de pipeline:
+Smokes operativos no destructivos:
 
 ```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode local --dry-run
+venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis --check-postgis
+venv/bin/python backend/scripts/postgis/smoke_test_productor.py
+venv/bin/python backend/scripts/postgis/smoke_test_regional.py
 ```
 
-Verificación con auditorías de calidad:
+Últimos resultados de smoke contra API local:
 
-```bash
-venv/bin/python scripts/run_pipeline_hidrico.py --mode local --run-quality-audits
+```text
+smoke productor: OK
+smoke regional: OK
 ```
 
-Verificación con backfill inicial de outliers:
+Decisión corregida:
 
-```bash
-venv/bin/python scripts/run_pipeline_hidrico.py \
-  --mode local \
-  --backfill-outlier-history \
-  --dry-run
+```text
+La animación de riesgo del productor usa categorías absolutas por defecto.
+No debe recolorear por posición relativa entre parcelas.
+El escenario sin riego no muestra mejoras artificiales.
 ```
 
 ## Auditoría De Calidad Del Ranking
@@ -1933,14 +2054,147 @@ Decisiones:
   estructura interna de asociación productor/campo-parcela;
 - el schema PostGIS migra roles antiguos a los nuevos al reaplicarse;
 - el dashboard Admin incorpora una pestaña `Usuarios`;
-- el API expone `GET/POST/PUT /admin/usuarios`;
+- el API expone `GET/POST/PUT/DELETE /admin/usuarios`;
+- `DELETE /admin/usuarios/{id}` es baja lógica: desactiva el acceso y conserva
+  trazabilidad;
+- el backend impide desactivar o cambiar de rol al último admin activo;
+- los productores activos requieren `email`, `nombre`, `apellido`, `DNI` y
+  contraseña; se pueden crear sin parcelas y asignarlas después;
+- la pestaña `Productores` permite asignar parcelas por mapa o por IDs y
+  desasignar relaciones en lote;
+- el área Admin `Análisis` usa navegación lazy por sección, no `st.tabs`, para
+  evitar renderizar mapa y tablas pesadas cuando no están visibles;
+- el mapa Admin usa geometría optimizada por defecto; en PostGIS se solicita
+  `simplify_meters=2` sobre el endpoint GeoJSON y en fallback local se usa
+  `san_rafael_vid_olivo_dashboard.geojson`;
 - los usuarios demo quedan como `admin`, `finca`, `olivar` y `regional`.
 
 Verificación local:
 
 ```text
-63 tests passed
+87 tests passed
 usuarios demo PostGIS: admin, productor, productor, regional
+```
+
+## Ensayo Productivo Local Para Cloud
+
+Fecha:
+
+```text
+2026-06-18
+```
+
+Objetivo:
+
+```text
+Simular lo más posible el despliegue productivo de OSMOSENSE antes de pasar a
+UM-Cloud.
+```
+
+Configuración ensayada:
+
+- `APP_ENV=production`;
+- `ENABLE_LOCAL_FALLBACK=false`;
+- `ENABLE_QUICK_LOGIN=false`;
+- `AUTH_SECRET` fuerte para ensayo local;
+- `DATABASE_URL` apuntando a PostGIS local;
+- `API_BASE_URL=http://127.0.0.1:8000`;
+- API y dashboard levantados contra PostGIS, no contra fallback CSV.
+
+Cambios de preparación:
+
+- se corrigió la nomenclatura del despliegue a `OSMOSENSE`/`osmosense`;
+- los servicios `systemd` quedan como `osmosense-*`;
+- la ruta recomendada de VM queda en `/opt/osmosense`;
+- se reemplazó la variable de entorno legacy por `OSMOSENSE_ENV`;
+- los usuarios de la base local fueron migrados desde el dominio legacy a
+  `@osmosense.local`;
+- las contraseñas demo conocidas fueron rotadas para que no queden activas en
+  el ensayo productivo.
+
+Credenciales locales de ensayo:
+
+```text
+admin@osmosense.local / OsmosenseAdminDemo2026!
+productor.vid@osmosense.local / OsmosenseVidDemo2026!
+productor.olivo@osmosense.local / OsmosenseOlivoDemo2026!
+regional@osmosense.local / OsmosenseRegionalDemo2026!
+```
+
+Scripts agregados para preparación cloud:
+
+```text
+backend/scripts/maintenance/run_preflight_cloud.py
+backend/scripts/maintenance/preflight_cloud.py
+backend/scripts/maintenance/rotar_credenciales_cloud.py
+deployment/systemd/osmosense-api.service
+deployment/systemd/osmosense-dashboard.service
+deployment/systemd/osmosense-pipeline.service
+deployment/systemd/osmosense-pipeline.timer
+deployment/systemd/osmosense-postgis-backup.service
+deployment/systemd/osmosense-postgis-backup.timer
+docs/despliegue_um_cloud.md
+```
+
+Decisiones de seguridad mínimas:
+
+- `AUTH_SECRET` es obligatorio en producción;
+- `AUTH_SECRET` debe tener al menos 32 caracteres;
+- se rechazan secretos de ejemplo;
+- `preflight_cloud` falla si detecta contraseñas demo conocidas;
+- `.env` debe tener permisos restringidos;
+- en producción no se permite fallback local ni login rápido.
+
+Resultado del preflight:
+
+```text
+0 fallas, 2 advertencias
+```
+
+Advertencias esperadas en entorno local:
+
+- `DATABASE_URL` usa credencial local/dev `estres_dev`;
+- `API_BASE_URL` apunta a `localhost`.
+
+Validaciones realizadas:
+
+```text
+SMOKE PRODUCTOR OK
+SMOKE REGIONAL OK
+SMOKE CRUD PRODUCTOR OK
+Streamlit respondió HTTP 200
+API respondió /health
+```
+
+El smoke CRUD asignó temporalmente una parcela libre al productor y luego la
+desasignó. Resultado:
+
+```text
+la parcela dejó de verse en /me/parcelas y /me/rankings/latest/geojson
+```
+
+Comando principal de preflight para cloud:
+
+```bash
+venv/bin/python backend/scripts/maintenance/run_preflight_cloud.py --check-db
+```
+
+Comando principal de rotación de credenciales:
+
+```bash
+venv/bin/python backend/scripts/maintenance/rotar_credenciales_cloud.py --confirm
+```
+
+Validación automatizada posterior:
+
+```text
+98 tests passed
+```
+
+Conclusión:
+
+```text
+El sistema queda listo para repetir el mismo flujo dentro de la VM UM-Cloud.
 ```
 
 ## Decisiones Descartadas O Resumidas

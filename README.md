@@ -13,7 +13,7 @@ satelitales Sentinel-2 y modelos de inteligencia artificial.
 - Predicción/proyección a 5 y 10 días
 - Visualización web para Admin, Productor y Regional
 - Zonificación regional por UM con ranking agregado
-- API FastAPI con fallback local o PostGIS
+- API FastAPI con PostGIS operativo y fallback local solo para desarrollo
 - Pipeline local/cloud preparado para automatización
 
 ## Requisitos
@@ -22,9 +22,9 @@ satelitales Sentinel-2 y modelos de inteligencia artificial.
 - Ubuntu 22.04 o superior (desarrollado y probado en este entorno)
 - Docker, opcional pero recomendado para PostGIS local
 
-`psycopg[binary]` está declarado para el flujo PostGIS. Si solo se usa el
-fallback local CSV/GeoJSON, la API y el dashboard pueden ejecutarse sin conectarse
-a PostGIS.
+`psycopg[binary]` está declarado para el flujo PostGIS. En desarrollo se puede
+usar fallback local CSV/GeoJSON, pero en producción (`APP_ENV=production`)
+`DATABASE_URL` es obligatorio.
 
 ## Instalación
 
@@ -52,6 +52,7 @@ Crear un archivo `.env` en la raíz del proyecto:
 ```text
 GEE_PROJECT_ID=tu-proyecto-gee
 API_BASE_URL=http://127.0.0.1:8000
+APP_ENV=development
 ```
 
 Si se usa PostGIS local:
@@ -59,6 +60,9 @@ Si se usa PostGIS local:
 ```text
 DATABASE_URL=postgresql://estres:estres_dev@127.0.0.1:5433/estres
 API_BASE_URL=http://127.0.0.1:8000
+AUTH_SECRET=cambiar-este-secreto-local
+ENABLE_LOCAL_FALLBACK=true
+ENABLE_QUICK_LOGIN=true
 ```
 
 Ejemplos disponibles:
@@ -79,6 +83,8 @@ earthengine authenticate
 Referencias rápidas:
 
 ```text
+docs/contexto_tesis.md
+docs/diagramas.md
 docs/comandos.md
 docs/estructura_proyecto.md
 docs/FUTURE.md
@@ -238,7 +244,9 @@ El inventario de código vigente, auxiliar y legacy está en
 
 El despliegue objetivo es UM-Cloud. La guía de acceso/provisionamiento está en
 `docs/UM_Cloud_Setup_Guide.md` y la arquitectura operativa del pipeline está en
-`docs/arquitectura_cloud_pipeline.md`.
+`docs/arquitectura_cloud_pipeline.md`. Los pasos concretos para instalar la VM,
+configurar `.env`, levantar servicios `systemd`, programar el pipeline y validar
+smoke tests estan en `docs/despliegue_um_cloud.md`.
 
 ## Límite geográfico
 
@@ -268,6 +276,15 @@ Validar conteos:
 
 ```bash
 venv/bin/python backend/scripts/postgis/validar_postgis_local.py
+```
+
+Validar API/PostGIS y flujo productor sin modificar datos:
+
+```bash
+venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis --check-postgis
+venv/bin/python backend/scripts/postgis/smoke_test_productor.py
+venv/bin/python backend/scripts/postgis/smoke_test_crud_productor.py --confirm-mutating
+venv/bin/python backend/scripts/postgis/smoke_test_regional.py
 ```
 
 Pruebas sin conectarse a una base:
@@ -301,6 +318,9 @@ Endpoints principales:
 ```text
 GET /health
 POST /auth/login
+GET /me
+GET /me/rankings/latest/geojson
+GET /me/parcelas
 GET /rankings/latest
 GET /rankings/latest/geojson
 GET /rankings/{fecha}
@@ -326,6 +346,10 @@ GET /regional/um/latest
 GET /regional/um/latest/geojson
 GET /regional/um/{um_id}/parcelas/latest/geojson
 ```
+
+Las rutas `/clientes/*` y `/admin/clientes/*` son compatibilidad interna para
+la relación productor-parcela vigente. En la experiencia de producto se muestran
+como productores y parcelas asignadas.
 
 ## Dashboard
 
@@ -403,6 +427,10 @@ Validar fallback local CSV/GeoJSON:
 ```bash
 venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --skip-api --check-local-fallback
 ```
+
+Ese fallback es una validación de desarrollo. En producción se configura
+`APP_ENV=production`, `DATABASE_URL`, `AUTH_SECRET`,
+`ENABLE_LOCAL_FALLBACK=false` y `ENABLE_QUICK_LOGIN=false`.
 
 Validación completa local, con API y PostGIS:
 

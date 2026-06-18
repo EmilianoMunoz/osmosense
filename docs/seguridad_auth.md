@@ -36,6 +36,11 @@ Los roles operativos vigentes son:
 | `regional` | Regional | Acceso a vistas agregadas por UM/región. |
 | `productor` | Productor | Acceso limitado a las parcelas asociadas a su `cliente_id`. |
 
+Nota: `cliente_id` es el identificador interno de la cartera de parcelas del
+productor. Se conserva por compatibilidad con el schema actual, pero en la
+interfaz y en la documentación de producto se describe como productor-parcelas,
+no como gestión de clientes.
+
 También existen aliases legacy:
 
 ```python
@@ -93,7 +98,7 @@ Si el login es exitoso, la respuesta tiene esta forma:
   "access_token": "...",
   "user": {
     "usuario_id": 1,
-    "email": "admin@smosense.local",
+    "email": "admin@osmosense.local",
     "nombre": "Administrador",
     "apellido": null,
     "dni": null,
@@ -153,7 +158,7 @@ El payload incluye:
 | `apellido` | Apellido, si fue cargado |
 | `dni` | DNI, si fue cargado |
 | `rol` | `admin`, `regional` o `productor` |
-| `cliente_id` | Productor/campo asociado, si aplica |
+| `cliente_id` | Cartera de parcelas del productor, si aplica |
 | `view_mode` | Vista inicial sugerida |
 | `iat` | Fecha/hora de emisión |
 | `exp` | Fecha/hora de expiración |
@@ -188,7 +193,14 @@ Si `AUTH_SECRET` no está definida, se usa un valor dev por defecto:
 estres-dev-auth-secret
 ```
 
-En producción debe configurarse `AUTH_SECRET` explícitamente.
+En producción (`APP_ENV=production`) debe configurarse `AUTH_SECRET`
+explícitamente. Si falta, la API no firma tokens y el login falla con error de
+configuración.
+
+Además, en producción se rechazan secretos de ejemplo o demasiado cortos. El
+mínimo actual es de 32 caracteres y no se aceptan valores como
+`cambiar-por-secreto-fuerte`, `cambiar-este-secreto` o
+`reemplazar-por-secreto-largo-de-produccion`.
 
 ## Verificación Del Token
 
@@ -217,6 +229,10 @@ Si falla, responde:
 401 Unauthorized
 ```
 
+Si el entorno productivo no tiene `AUTH_SECRET`, la validacion responde como
+error de configuracion (`503`) porque no se puede verificar la firma de forma
+segura.
+
 ## Permisos Por Endpoint
 
 Los permisos se aplican con dependencias FastAPI.
@@ -238,7 +254,11 @@ Ejemplos:
 | `/rankings/latest` | `admin` |
 | `/rankings/latest/geojson` | `admin` |
 | `/pipeline/state` | `admin` |
+| `/me` | cualquier usuario autenticado |
+| `/me/rankings/latest/geojson` | `productor` |
+| `/me/parcelas` | `productor` |
 | `/admin/usuarios` | `admin` |
+| `/admin/usuarios/{id}` | `admin` |
 | `/admin/parcelas/disponibles` | `admin` |
 | `/regional/um/latest/geojson` | `admin`, `regional` |
 
@@ -260,6 +280,27 @@ Se usa en:
 
 ```text
 GET /clientes/{cliente_id}/rankings/latest/geojson
+```
+
+### `require_productor_with_cliente`
+
+Uso:
+
+```python
+Depends(require_productor_with_cliente)
+```
+
+Regla:
+
+- solo permite rol `productor`;
+- exige que el token tenga `cliente_id`;
+- no recibe `cliente_id` por URL.
+
+Se usa en:
+
+```text
+GET /me/rankings/latest/geojson
+GET /me/parcelas
 ```
 
 ## Sesión En Streamlit
@@ -390,10 +431,12 @@ venv/bin/python -m pytest tests/test_auth.py tests/test_api_handlers.py -q
 - El token no es JWT estándar.
 - No hay refresh token.
 - No hay revocación de token en servidor.
-- Los accesos rápidos dependen de usuarios reales en PostGIS.
-- `AUTH_SECRET` debe configurarse explícitamente en producción.
-- El fallback local es útil para desarrollo, pero puede ocultar problemas de API
-  si no se revisa la fuente mostrada.
+- Los accesos rápidos dependen de usuarios reales en PostGIS y quedan
+  deshabilitados cuando `APP_ENV=production`.
+- `AUTH_SECRET` debe configurarse explícitamente en producción, con al menos 32
+  caracteres y sin usar valores de ejemplo.
+- El fallback local es útil para desarrollo; en producción queda deshabilitado
+  con `ENABLE_LOCAL_FALLBACK=false` y `APP_ENV=production`.
 - No hay HTTPS configurado dentro de la app; debe resolverlo el proxy/despliegue.
 
 ## Camino A Producción
@@ -402,9 +445,13 @@ Antes de producción conviene:
 
 1. Migrar el token propio a JWT estándar o documentar formalmente la decisión de mantener HMAC propio.
 2. Definir `AUTH_SECRET` fuerte en `.env`/secrets de cloud.
-3. Mantener accesos rápidos solo si apuntan a usuarios reales controlados.
-4. Exigir HTTPS en el entorno cloud.
-5. Agregar política de rotación de contraseñas si el alcance del producto lo requiere.
-6. Registrar intentos de login fallidos.
-7. Revisar expiración de token y UX al expirar sesión.
-8. Agregar tests de permisos con cliente/productor reales desde fixtures PostGIS.
+3. Rotar credenciales demo con
+   `backend/scripts/maintenance/rotar_credenciales_cloud.py --confirm`.
+4. Ejecutar `backend/scripts/maintenance/run_preflight_cloud.py --check-db` antes
+   de la demo cloud.
+5. Mantener `ENABLE_QUICK_LOGIN=false` en producción.
+6. Exigir HTTPS en el entorno cloud si se expone fuera de ZeroTier.
+7. Agregar política de rotación de contraseñas si el alcance del producto lo requiere.
+8. Registrar intentos de login fallidos.
+9. Revisar expiración de token y UX al expirar sesión.
+10. Agregar tests de permisos con cliente/productor reales desde fixtures PostGIS.

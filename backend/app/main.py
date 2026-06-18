@@ -29,7 +29,12 @@ from backend.app.services.rankings import (
     regional_um_parcelas_latest_geojson,
 )
 from backend.app.services.pipeline_state import pipeline_state
-from backend.app.services.users import admin_create_usuario, admin_update_usuario, admin_usuarios
+from backend.app.services.users import (
+    admin_create_usuario,
+    admin_deactivate_usuario,
+    admin_update_usuario,
+    admin_usuarios,
+)
 
 
 class ClienteCreate(BaseModel):
@@ -130,6 +135,8 @@ def current_user(authorization: str | None = Header(default=None)) -> dict[str, 
     token = authorization.split(" ", 1)[1].strip()
     try:
         return verify_access_token(token)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
@@ -152,6 +159,16 @@ def require_cliente_or_admin(
     if user["rol"] == "productor" and user.get("cliente_id") == cliente_id:
         return user
     raise HTTPException(status_code=403, detail="Productor no autorizado.")
+
+
+def require_productor_with_cliente(
+    user: dict[str, Any] = Depends(current_user),
+) -> dict[str, Any]:
+    if user["rol"] != "productor":
+        raise HTTPException(status_code=403, detail="Rol no autorizado.")
+    if user.get("cliente_id") is None:
+        raise HTTPException(status_code=403, detail="Productor sin parcelas asignadas.")
+    return user
 
 
 app = FastAPI(
@@ -178,6 +195,41 @@ def post_auth_login(payload: LoginRequest) -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@app.get("/me")
+def get_me(user: dict[str, Any] = Depends(current_user)) -> dict:
+    return {"source": "token", "user": user}
+
+
+@app.get("/me/rankings/latest/geojson")
+def get_my_latest_ranking_geojson(
+    user: dict[str, Any] = Depends(require_productor_with_cliente),
+) -> dict:
+    try:
+        return latest_geojson_cliente(int(user["cliente_id"]))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/me/parcelas")
+def get_my_parcelas(
+    user: dict[str, Any] = Depends(require_productor_with_cliente),
+) -> dict:
+    try:
+        return admin_cliente_parcelas(int(user["cliente_id"]))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.get("/rankings/latest")
 def get_latest_ranking(
     limit: int | None = Query(default=None, ge=1, le=5000),
@@ -185,16 +237,21 @@ def get_latest_ranking(
 ) -> dict:
     try:
         return latest_ranking(limit=limit)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/rankings/latest/geojson")
 def get_latest_ranking_geojson(
+    simplify_meters: float | None = Query(default=None, ge=0, le=20),
     _user: dict[str, Any] = Depends(require_roles("admin")),
 ) -> dict:
     try:
-        return latest_geojson()
+        return latest_geojson(simplify_meters=simplify_meters)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -213,6 +270,8 @@ def get_pipeline_state(
 def get_clientes(_user: dict[str, Any] = Depends(require_roles("admin"))) -> dict:
     try:
         return clientes()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -222,10 +281,16 @@ def get_admin_parcelas(
     limit: int | None = Query(default=None, ge=1, le=5000),
     cultivo: str | None = Query(default=None, pattern="^(vid|olivo)$"),
     activo: bool | None = Query(default=True),
+    sin_asignar: bool = False,
     _user: dict[str, Any] = Depends(require_roles("admin")),
 ) -> dict:
     try:
-        return admin_parcelas(limit=limit, cultivo=cultivo, activo=activo)
+        return admin_parcelas(
+            limit=limit,
+            cultivo=cultivo,
+            activo=activo,
+            sin_asignar=sin_asignar,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
@@ -391,6 +456,21 @@ def put_admin_usuario(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@app.delete("/admin/usuarios/{usuario_id}")
+def delete_admin_usuario(
+    usuario_id: int,
+    _user: dict[str, Any] = Depends(require_roles("admin")),
+) -> dict:
+    try:
+        return admin_deactivate_usuario(usuario_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.post("/admin/clientes", status_code=201)
 def post_admin_cliente(
     payload: ClienteCreate,
@@ -481,6 +561,8 @@ def get_latest_ranking_geojson_cliente(
 ) -> dict:
     try:
         return latest_geojson_cliente(cliente_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -497,6 +579,8 @@ def get_ranking_by_fecha(
 ) -> dict:
     try:
         return ranking_by_fecha(fecha=fecha, limit=limit)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -508,6 +592,8 @@ def get_regional_um_latest(
 ) -> dict:
     try:
         return regional_um_latest(limit=limit)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -518,6 +604,8 @@ def get_regional_um_latest_geojson(
 ) -> dict:
     try:
         return regional_um_latest_geojson()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -529,6 +617,8 @@ def get_regional_um_parcelas_latest_geojson(
 ) -> dict:
     try:
         return regional_um_parcelas_latest_geojson(um_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except FileNotFoundError as exc:

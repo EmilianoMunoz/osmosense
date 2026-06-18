@@ -40,10 +40,10 @@ Usuarios disponibles para desarrollo local:
 
 | Email | Contraseña | Vista |
 |---|---|---|
-| `admin@smosense.local` | `admin123` | Admin |
-| `productor.vid@smosense.local` | `cliente123` | Productor vid |
-| `productor.olivo@smosense.local` | `cliente123` | Productor olivo |
-| `regional@smosense.local` | `regional123` | Regional |
+| `admin@osmosense.local` | `admin123` | Admin |
+| `productor.vid@osmosense.local` | `cliente123` | Productor vid |
+| `productor.olivo@osmosense.local` | `cliente123` | Productor olivo |
+| `regional@osmosense.local` | `regional123` | Regional |
 
 La pantalla conserva accesos rápidos PostGIS:
 
@@ -73,11 +73,15 @@ frontend/logic.py
 frontend/map.py
 frontend/panels.py
 frontend/table_config.py
+frontend/components/branding.py
 frontend/components/charts.py
+frontend/components/client_feedback.py
 frontend/components/client_overview.py
 frontend/components/metrics.py
 frontend/components/parcel_detail.py
 frontend/components/tables.py
+frontend/views/admin/
+frontend/views/dashboard_filters.py
 frontend/views/dashboard.py
 frontend/views/regional.py
 ```
@@ -92,14 +96,18 @@ Responsabilidades:
 | `frontend/logic.py`                      | Prioridad dinámica, selección de valores visibles y reglas puras. |
 | `frontend/map.py`                        | Mapa, zoom, hover y selección de parcela.         |
 | `frontend/table_config.py`               | Columnas visibles, labels y restricciones por rol.|
-| `frontend/components/client_overview.py` | Estado general del campo en vista cliente.        |
+| `frontend/components/branding.py`        | Logo, estilos de marca y pantalla de carga.       |
+| `frontend/components/client_feedback.py` | Mensajes claros para productor.                   |
+| `frontend/components/client_overview.py` | Estado general de parcelas en vista productor.    |
 | `frontend/components/metrics.py`         | Métricas resumen.                                 |
 | `frontend/components/parcel_detail.py`   | Detalle y pop-up de parcela.                      |
 | `frontend/components/tables.py`          | Tablas y resúmenes tabulares.                     |
 | `frontend/components/charts.py`          | Gráficos de proyección y distribución.            |
 | `frontend/panels.py`                     | Fachada de compatibilidad para componentes.       |
+| `frontend/views/dashboard_filters.py`    | Filtros, navegación y selección de vista.         |
 | `frontend/views/dashboard.py`            | Orquestación de la vista Streamlit.               |
-| `frontend/views/regional.py`             | Vista de zonificación DGI recortada a San Rafael. |
+| `frontend/views/admin/`                  | Gestión admin de usuarios, productores y parcelas.|
+| `frontend/views/regional.py`             | Vista regional por UM DGI recortada a San Rafael. |
 
 El objetivo es mantener separada la lógica testeable de la composición visual.
 
@@ -115,23 +123,54 @@ Endpoints usados:
 
 ```text
 GET /rankings/latest/geojson
+GET /me
+GET /me/rankings/latest/geojson
+GET /me/parcelas
 GET /clientes
 GET /clientes/{cliente_id}/rankings/latest/geojson
+GET /admin/usuarios
+POST /admin/usuarios
+PUT /admin/usuarios/{usuario_id}
+DELETE /admin/usuarios/{usuario_id}
+GET /admin/clientes
+GET /admin/clientes/{cliente_id}/parcelas
+POST /admin/clientes/{cliente_id}/parcelas
+DELETE /admin/clientes/{cliente_id}/parcelas/{parcela_id}
 GET /admin/parcelas/disponibles
 POST /admin/parcelas/{parcela_id}/activar-disponible
 ```
 
-Si la API no responde, usa fallback local:
+La vista `Productor` usa `/me/rankings/latest/geojson`: el backend toma el
+productor desde el token y el frontend no construye la consulta con
+`cliente_id`. Las rutas `/clientes/{cliente_id}/...` quedan para compatibilidad
+interna y para vistas admin/debug.
+
+En desarrollo, si la API no responde, puede usar fallback local:
 
 ```text
 backend/data/rankings/ranking_hidrico_latest.csv
 backend/data/parcelas/san_rafael_vid_olivo_wgs84.geojson
 ```
 
+En producción (`APP_ENV=production`) ese fallback queda deshabilitado. Si la
+API/PostGIS no responde, la vista muestra error y no renderiza datos locales.
+Además, las vistas autenticadas de productor y las verificaciones admin por
+productor no usan fallback CSV cuando existe token de sesión: esto evita que el
+CRUD de asignación/desasignación quede inconsistente por relaciones locales
+viejas.
+
 ## Vistas incluidas
 
 ### Admin
 
+- entrada al área `Análisis` o `Gestión`;
+- en `Análisis`, selector lazy de secciones: `Estado`, `Mapa operativo`,
+  `Datos`, `Cobertura`, `Revisión técnica`. Solo se renderiza la sección activa
+  para evitar construir mapa y tablas pesadas en cada rerun;
+- en `Gestión`, dos secciones principales: `Usuarios` y `Parcelas`;
+- en `Usuarios`, alta, edición, reactivación y desactivación trazable de
+  accesos. Los productores requieren apellido y DNI válido;
+- en `Parcelas`, subsecciones `Asignar y desasignar` y `Agregar al análisis`;
 - mapa operativo filtrado por defecto a prioridades `alta` y `crítica`;
 - opción `Mostrar todas las prioridades` para cargar el universo completo;
 - filtros por cultivo, prioridad, confianza y rango de ranking;
@@ -139,8 +178,14 @@ backend/data/parcelas/san_rafael_vid_olivo_wgs84.geojson
   activa;
 - panel de proyección actual, 5 días y 10 días;
 - pestaña de revisión técnica de outliers/calidad;
+- asignación de parcelas analizadas sin productor mediante mapa o carga manual
+  de IDs;
+- desasignación de parcelas mediante mapa filtrado al productor seleccionado:
+  el clic sobre una parcela agrega o quita su ID de la selección a desasignar;
+- confirmación en popup luego de asignar o desasignar, con productor,
+  cantidad de parcelas, IDs afectados y conteo antes/después;
 - pestaña de parcelas disponibles para activar no vid/no olivo como `vid` u
-  `olivo` y asignarlas opcionalmente a un cliente;
+  `olivo` y asignarlas opcionalmente a un productor;
 - pestaña de cobertura con evaluadas, sin ranking y confianza de lectura;
 - top de parcelas críticas;
 - resumen por cultivo;
@@ -157,22 +202,41 @@ delta_operativo_10d
 Si una corrida antigua no tiene esas columnas, el frontend hace fallback a las
 predicciones crudas `riesgo_pred_*`.
 
-### Cliente
+### Productor
 
-- selector local de cliente;
-- estado general del campo antes del mapa;
-- mapa limitado a parcelas asociadas al cliente;
+- pestañas en orden: `Mapa`, `Resumen`, `Parcelas`;
+- mapa limitado a parcelas asociadas al productor como primera vista;
 - slider bajo el mapa para visualizar riesgo actual, proyección 5 días y
-  proyección 10 días con categorías relativas al campo visible;
-- métricas operativas orientadas a detección de estrés hídrico;
-- panel de proyección por parcela a 5 y 10 días;
+  proyección 10 días;
+- mensaje superior en lenguaje simple con cantidad de parcelas en atención y
+  evolución general esperada;
+- resumen operativo de sus parcelas;
+- métricas operativas con etiquetas no técnicas (`Atención crítica`,
+  `Atención alta`, `Señal promedio`, `Señal más alta`);
+- panel lateral de comparación de la parcela seleccionada contra el promedio de
+  las parcelas visibles del productor;
+- dos gráficos horizontales simples: uno para riesgo actual y otro para
+  escenario a 10 días, cada uno con una línea celeste de promedio del conjunto;
+- indicadores de evolución con flecha roja hacia arriba cuando aumenta el
+  riesgo, flecha verde hacia abajo cuando disminuye y flecha gris cuando se
+  mantiene estable. Se evita el signo `+` porque puede leerse como algo
+  positivo;
+- barras de comparación coloreadas con la misma escala semántica del mapa:
+  verde bajo, amarillo medio, naranja alto y rojo crítico;
+- bloque de `Mayor aumento esperado`, que separa las parcelas con mayor cambio
+  proyectado de las parcelas que ya tienen mayor riesgo actual;
+- lectura simple por parcela: estado actual, evolución esperada, tendencia y
+  fecha de lectura;
+- listado de parcelas para revisar primero, sin exponer columnas técnicas;
 - tabla simplificada de sus parcelas con nombres legibles;
 - sin pestaña de revisión técnica.
+- sin gráfico de distribución de prioridades, porque no aporta una acción clara
+  para el productor;
 - sin recomendación directa de riego: el usuario interpreta la información con
   su experiencia de manejo.
 - la parcela seleccionada se resalta en el mapa.
 
-La vista cliente muestra la proyección operativa:
+La vista productor muestra la proyección operativa:
 
 ```text
 riesgo_operativo_5d
@@ -184,9 +248,9 @@ condición actual. La proyección sube o se mantiene con el paso de los días, t
 en cuenta tendencia reciente, cultivo y estación, y evita mostrar mejoras que
 en el histórico pudieron deberse a riego o lluvia entre imágenes.
 
-En el mapa cliente, el slider temporal colorea de verde a rojo según la posición
-relativa de cada parcela dentro del campo visible para cada día interpolado. Esto
-mantiene consistencia con el criterio `Dentro de mi campo` de la tabla.
+En el mapa productor, el slider temporal colorea de verde a rojo según la
+evolución operativa de cada parcela visible. La categoría de la animación usa
+umbrales absolutos por defecto, no posición relativa entre parcelas.
 
 La vista admin puede conservar columnas de predicción ML cruda en tablas
 técnicas:
@@ -199,22 +263,21 @@ riesgo_pred_10d
 pero la visualización principal de mapa, popup y panel usa la proyección
 operativa.
 
-Para habilitar clientes en fallback local:
+Compatibilidad local heredada para relaciones productor-parcela:
 
 ```text
 backend/data/clientes/clientes.csv
 backend/data/clientes/cliente_parcela.csv
 ```
 
-Productores de desarrollo actuales:
-
-```text
-Finca Demo Norte: parcelas vecinas de vid
-Olivar Demo Este: parcelas vecinas de olivo
-```
+En producto, la entidad visible es `productor`. Los nombres `clientes` y
+`cliente_parcela` quedan como compatibilidad interna hasta migrar a
+`usuario_id -> parcela`.
 
 ### Regional
 
+- pestañas en orden: `Mapa regional`, `Foco regional`, `Ranking UM`,
+  `Parcelas de la UM`;
 - mapa de UM DGI con parcelas oficiales de vid/olivo;
 - filtros por cuenca, prioridad regional y mínimo de parcelas;
 - categorización por umbrales fijos o relativa por percentiles dentro de las
@@ -222,6 +285,8 @@ Olivar Demo Este: parcelas vecinas de olivo
 - color por prioridad regional, score promedio, porcentaje alta/crítica o
   superficie cultivada;
 - métricas de UM, parcelas, cobertura de ranking y superficie cultivada;
+- foco regional con UM de mayor aumento proyectado, concentración alta/crítica
+  y baja cobertura;
 - tabla de ranking regional por UM.
 - al seleccionar una UM en el mapa se muestra un detalle con fecha de ranking,
   score regional, riesgo actual, riesgo proyectado a 10 días, composición
@@ -245,7 +310,11 @@ sobre zonas efectivamente productivas.
 El dashboard admin muestra todas las parcelas oficiales vid/olivo. Las parcelas
 sin ranking se mantienen visibles en gris.
 
-Para acelerar el mapa se usa un GeoJSON liviano de visualización:
+Para acelerar el mapa se usa geometría optimizada solo para visualización:
+
+- con PostGIS, el frontend puede pedir
+  `/rankings/latest/geojson?simplify_meters=2`;
+- en fallback local, se usa un GeoJSON liviano:
 
 ```text
 backend/data/parcelas/san_rafael_vid_olivo_dashboard.geojson
@@ -257,9 +326,9 @@ Se genera desde el parcelario operativo con:
 venv/bin/python backend/scripts/maintenance/generar_geojson_dashboard_parcelas.py
 ```
 
-Este archivo conserva `fid`, `cultivo`, `area_m2` y geometría simplificada. El
-ranking y los datos del hover siguen viniendo del DataFrame, por eso el GeoJSON
-que se envía a Plotly se reduce a geometría + `parcela_id`.
+El dashboard Admin usa la geometría optimizada por defecto. La optimización no
+modifica la geometría persistida ni los modelos; solo cambia la geometría
+enviada al navegador para dibujar el mapa.
 
 Para auditar faltantes:
 

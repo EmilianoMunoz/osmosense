@@ -40,6 +40,36 @@ Los demás targets sirven para interpretación agronómica.
 
 ---
 
+## Lectura de producto
+
+El sistema produce dos lecturas distintas:
+
+1. **Predicción ML cruda**.
+   Es la salida directa de los regresores entrenados con histórico Sentinel-2.
+   Para cada parcela estima cómo se comportó una señal similar en el pasado a
+   5 y 10 días. Como el histórico incluye riego, lluvia, manejo y recuperación
+   natural entre imágenes, esta predicción puede subir o bajar.
+
+2. **Proyección operativa**.
+   Es una capa posterior usada para comunicar al productor un escenario
+   conservador: qué pasaría si la condición actual no mejora. Esta proyección
+   no baja respecto del riesgo actual, incorpora tendencia reciente, cultivo y
+   estación, y se usa en el mapa productor.
+
+Por rol:
+
+| Rol | Lectura principal | Motivo |
+|-----|-------------------|--------|
+| Admin | predicción ML cruda + proyección operativa | Permite auditar modelo, ranking y reglas de producto. |
+| Productor | proyección operativa | Evita mostrar mejoras que podrían depender de riego, lluvia o manejo no observado por el sistema. |
+| Regional | agregados por UM | Resume riesgo y evolución esperada por zona. |
+
+El sistema **no recomienda riego automáticamente**. Ordena señales de atención
+hídrica para que el usuario las combine con conocimiento de campo, turnos,
+disponibilidad de agua y decisiones productivas.
+
+---
+
 ## Fuente de datos
 
 El dataset base es:
@@ -169,7 +199,7 @@ El score está acotado a:
 0 <= riesgo_hidrico <= 100
 ```
 
-Valores altos indican mayor prioridad relativa de atención/riego.
+Valores altos indican mayor prioridad relativa de atención hídrica.
 
 ### Naturaleza relativa del score
 
@@ -548,27 +578,86 @@ Interpretación:
 - El modelo identifica entre 76.6% y 83.0% del top 10% más crítico,
   según cultivo y horizonte.
 
-Validación operativa multifecha sobre 2024, simulando ranking en fecha X y
-comparación contra observación empírica en X+5 y X+10. Se descartan filas de
-resumen con menos de 50 parcelas evaluadas para evitar métricas inestables:
+Validación operativa multifecha completa, simulando predicción en fecha X y
+comparando contra observación empírica Sentinel-2 en X+5 y X+10. La validación
+recorre 26 fechas entre `2023-01-11` y `2026-05-06`:
 
 | Cultivo | Horizonte | Fechas | MAE   | RMSE  | Bias   | Spearman | Top10 overlap |
 |---------|-----------|--------|-------|-------|--------|----------|---------------|
-| global  | 5 días    | 12     | 3.882 | 5.824 | -0.896 | 0.960    | 0.835         |
-| global  | 10 días   | 12     | 4.711 | 6.891 | -1.110 | 0.943    | 0.808         |
-| vid     | 5 días    | 12     | 4.121 | 6.102 | -0.916 | 0.959    | 0.837         |
-| vid     | 10 días   | 12     | 5.235 | 7.517 | -1.385 | 0.933    | 0.806         |
-| olivo   | 5 días    | 12     | 3.350 | 5.032 | -0.854 | 0.965    | 0.823         |
-| olivo   | 10 días   | 12     | 3.597 | 5.218 | -0.545 | 0.965    | 0.785         |
+| global  | 5 días    | 25     | 4.079 | 5.865 | -0.925 | 0.958    | 0.835         |
+| global  | 10 días   | 25     | 4.659 | 6.663 | -1.032 | 0.951    | 0.817         |
+| vid     | 5 días    | 25     | 4.277 | 6.159 | -0.634 | 0.956    | 0.835         |
+| vid     | 10 días   | 25     | 5.191 | 7.324 | -0.968 | 0.942    | 0.809         |
+| olivo   | 5 días    | 23     | 3.660 | 5.091 | -1.540 | 0.965    | 0.864         |
+| olivo   | 10 días   | 23     | 3.521 | 4.988 | -1.174 | 0.971    | 0.842         |
 
-Por estación, el ranking se mantiene estable. La validación anterior incluía
-una fecha con una sola parcela evaluada, lo que distorsionaba el promedio de
-verano. Con `min-n-summary=50`, verano queda en un rango consistente:
+Lectura operativa:
+
+- El error promedio global queda cerca de 4.1 puntos a 5 días y 4.7 puntos a
+  10 días sobre escala 0-100.
+- La correlación de ranking se mantiene alta: Spearman 0.958 a 5 días y 0.951
+  a 10 días.
+- El modelo recupera aproximadamente 83.5% del top 10% más crítico a 5 días y
+  81.7% a 10 días.
+- El sesgo es levemente negativo: en promedio tiende a subestimar el riesgo
+  futuro alrededor de 1 punto.
+
+Error absoluto por tolerancia:
+
+| Cultivo | Horizonte | Predicciones | Error <= 5 pts | Error <= 10 pts | Acierto dirección |
+|---------|-----------|--------------|----------------|-----------------|-------------------|
+| global  | 5 días    | 22652        | 73.0%          | 92.1%           | 64.1%             |
+| global  | 10 días   | 21099        | 67.8%          | 88.9%           | 63.3%             |
+| vid     | 5 días    | 15333        | 70.5%          | 91.4%           | 64.5%             |
+| vid     | 10 días   | 14364        | 63.1%          | 86.4%           | 63.0%             |
+| olivo   | 5 días    | 7319         | 78.2%          | 93.7%           | 63.2%             |
+| olivo   | 10 días   | 6735         | 77.6%          | 94.2%           | 63.8%             |
+
+Por estación, el ranking se mantiene estable. Otoño es el período más débil
+en error absoluto, aunque conserva correlación ordinal alta:
 
 | Estación | Horizonte | MAE global | Spearman global | Top10 overlap global |
 |----------|-----------|------------|-----------------|----------------------|
-| verano   | 5 días    | 3.958      | 0.966           | 0.873                |
-| verano   | 10 días   | 4.375      | 0.953           | 0.866                |
+| invierno | 5 días    | 3.722      | 0.969           | 0.819                |
+| invierno | 10 días   | 4.237      | 0.955           | 0.804                |
+| otoño    | 5 días    | 5.085      | 0.941           | 0.804                |
+| otoño    | 10 días   | 5.596      | 0.944           | 0.786                |
+| primavera| 5 días    | 3.852      | 0.957           | 0.837                |
+| primavera| 10 días   | 4.459      | 0.949           | 0.815                |
+| verano   | 5 días    | 3.692      | 0.968           | 0.870                |
+| verano   | 10 días   | 4.405      | 0.955           | 0.852                |
+
+Reporte reproducible:
+
+```bash
+venv/bin/python backend/scripts/modeling/validar_ranking_hidrico_multifecha.py \
+  --input backend/data/dataset_temporal_hidrico.csv \
+  --model-dir backend/models/hidrico_regresion \
+  --output-detail backend/data/validacion_predictor_hidrico_detalle.csv \
+  --output-summary backend/data/validacion_predictor_hidrico_resumen.csv \
+  --every 4 \
+  --min-n-summary 50
+
+venv/bin/python backend/scripts/modeling/generar_reporte_validacion_predictor_hidrico.py \
+  --detail backend/data/validacion_predictor_hidrico_detalle.csv \
+  --summary backend/data/validacion_predictor_hidrico_resumen.csv \
+  --output-report docs/validacion_predictor_hidrico.md
+```
+
+El reporte vigente queda en:
+
+```text
+docs/validacion_predictor_hidrico.md
+```
+
+Los CSV de detalle son artefactos grandes y quedan fuera de git:
+
+```text
+backend/data/validacion_predictor_hidrico_detalle.csv
+backend/data/validacion_predictor_hidrico_resumen.csv
+backend/data/validacion_predictor_hidrico_agregado.csv
+backend/data/validacion_predictor_hidrico_peores_fechas.csv
+```
 
 ---
 
@@ -710,7 +799,7 @@ histórico real. Por eso pueden predecir una baja del riesgo si en casos
 similares del pasado hubo recuperación, riego, lluvia o mejora de señal
 satelital entre imágenes.
 
-Para el dashboard de cliente se agrega una segunda lectura:
+Para el dashboard de productor se agrega una segunda lectura:
 
 ```text
 riesgo_operativo_5d
@@ -738,7 +827,7 @@ tendencia = max(0, 0.7 * tendencia_5d + 0.3 * tendencia_10d_prom)
 
 Esto hace que pese más la ventana más cercana. Si la parcela viene empeorando,
 esa pendiente se conserva. Si viene mejorando, la pendiente negativa no reduce
-la proyección operativa, porque el escenario mostrado al cliente es de no
+la proyección operativa, porque el escenario mostrado al productor es de no
 mejora.
 
 Además se aplica una pendiente mínima según prioridad:
@@ -798,7 +887,7 @@ riesgo_operativo_10d >= riesgo_pred_10d
 Uso en producto:
 
 - vista admin: conserva predicción ML cruda para auditoría técnica;
-- vista cliente: muestra la proyección operativa, porque comunica mejor el
+- vista productor: muestra la proyección operativa, porque comunica mejor el
   escenario de deterioro si la condición no mejora;
 - el ranking actual no cambia por esta capa; sigue usando la fórmula calibrada
   de `prioridad_score`.

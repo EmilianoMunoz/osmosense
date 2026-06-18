@@ -6,21 +6,78 @@ from backend.app import main
 
 
 class RankingsApiHandlersTest(unittest.TestCase):
+    def setUp(self):
+        self.production_patch = patch.object(rankings, "is_production", return_value=False)
+        self.production_patch.start()
+
+    def tearDown(self):
+        self.production_patch.stop()
+
     def test_health_handler(self):
         self.assertEqual(main.health(), {"status": "ok"})
 
     def test_auth_login_handler_delegates_to_service(self):
-        payload = main.LoginRequest(email="admin@smosense.local", password="admin123")
+        payload = main.LoginRequest(email="admin@osmosense.local", password="admin123")
         expected = {
             "source": "postgis",
             "token_type": "bearer",
             "access_token": "token",
-            "user": {"email": "admin@smosense.local", "view_mode": "Admin"},
+            "user": {"email": "admin@osmosense.local", "view_mode": "Admin"},
         }
         with patch.object(main, "authenticate_user", return_value=expected) as mocked:
             result = main.post_auth_login(payload)
 
-        mocked.assert_called_once_with("admin@smosense.local", "admin123")
+        mocked.assert_called_once_with("admin@osmosense.local", "admin123")
+        self.assertEqual(result, expected)
+
+    def test_me_handler_returns_token_user(self):
+        user = {
+            "usuario_id": 7,
+            "email": "prod@osmosense.local",
+            "rol": "productor",
+            "cliente_id": 3,
+        }
+
+        result = main.get_me(user)
+
+        self.assertEqual(result["source"], "token")
+        self.assertEqual(result["user"], user)
+
+    def test_require_productor_with_cliente_rejects_non_productor(self):
+        with self.assertRaises(main.HTTPException) as context:
+            main.require_productor_with_cliente({"rol": "admin", "cliente_id": None})
+
+        self.assertEqual(context.exception.status_code, 403)
+
+    def test_require_productor_with_cliente_rejects_productor_without_cliente(self):
+        with self.assertRaises(main.HTTPException) as context:
+            main.require_productor_with_cliente({"rol": "productor", "cliente_id": None})
+
+        self.assertEqual(context.exception.status_code, 403)
+
+    def test_my_latest_geojson_uses_cliente_id_from_token(self):
+        user = {"rol": "productor", "cliente_id": 12}
+        expected = {
+            "source": "postgis",
+            "type": "FeatureCollection",
+            "cliente_id": 12,
+            "features": [],
+        }
+
+        with patch.object(main, "latest_geojson_cliente", return_value=expected) as mocked:
+            result = main.get_my_latest_ranking_geojson(user)
+
+        mocked.assert_called_once_with(12)
+        self.assertEqual(result, expected)
+
+    def test_my_parcelas_uses_cliente_id_from_token(self):
+        user = {"rol": "productor", "cliente_id": 12}
+        expected = {"source": "postgis", "count": 1, "items": [{"parcela_id": 10}]}
+
+        with patch.object(main, "admin_cliente_parcelas", return_value=expected) as mocked:
+            result = main.get_my_parcelas(user)
+
+        mocked.assert_called_once_with(12)
         self.assertEqual(result, expected)
 
     def test_latest_ranking_handler(self):
@@ -30,6 +87,17 @@ class RankingsApiHandlersTest(unittest.TestCase):
         self.assertEqual(result["source"], "csv")
         self.assertEqual(result["count"], 2)
 
+    def test_latest_ranking_handler_reports_missing_database_url_as_503_in_production(self):
+        with (
+            patch.object(rankings, "is_production", return_value=True),
+            patch.object(rankings, "database_url", return_value=None),
+        ):
+            with self.assertRaises(main.HTTPException) as context:
+                main.get_latest_ranking(limit=2)
+
+        self.assertEqual(context.exception.status_code, 503)
+        self.assertIn("DATABASE_URL", context.exception.detail)
+
     def test_latest_geojson_handler(self):
         with patch.object(rankings, "database_url", return_value=None):
             result = main.get_latest_ranking_geojson()
@@ -37,6 +105,19 @@ class RankingsApiHandlersTest(unittest.TestCase):
         self.assertEqual(result["source"], "csv")
         self.assertEqual(result["type"], "FeatureCollection")
         self.assertGreater(len(result["features"]), 0)
+
+    def test_latest_geojson_handler_accepts_simplify_meters(self):
+        expected = {
+            "source": "postgis",
+            "type": "FeatureCollection",
+            "geometry_simplify_meters": 2.0,
+            "features": [],
+        }
+        with patch.object(main, "latest_geojson", return_value=expected) as mocked:
+            result = main.get_latest_ranking_geojson(simplify_meters=2.0)
+
+        mocked.assert_called_once_with(simplify_meters=2.0)
+        self.assertEqual(result, expected)
 
     def test_pipeline_state_handler_delegates_to_service(self):
         expected = {
@@ -152,7 +233,7 @@ class RankingsApiHandlersTest(unittest.TestCase):
 
     def test_admin_create_usuario_handler_delegates_to_service(self):
         payload = main.UsuarioCreate(
-            email="productor.demo@smosense.local",
+            email="productor.demo@osmosense.local",
             nombre="Productor",
             apellido="Demo",
             dni="30111222",
@@ -165,7 +246,7 @@ class RankingsApiHandlersTest(unittest.TestCase):
 
         mocked.assert_called_once_with(
             {
-                "email": "productor.demo@smosense.local",
+                "email": "productor.demo@osmosense.local",
                 "nombre": "Productor",
                 "apellido": "Demo",
                 "dni": "30111222",
@@ -186,12 +267,38 @@ class RankingsApiHandlersTest(unittest.TestCase):
         mocked.assert_called_once_with(1, {"rol": "regional", "cliente_id": None})
         self.assertEqual(result, expected)
 
+    def test_admin_delete_usuario_handler_delegates_to_service(self):
+        expected = {"source": "postgis", "deleted": True, "usuario_id": 1}
+        with patch.object(main, "admin_deactivate_usuario", return_value=expected) as mocked:
+            result = main.delete_admin_usuario(1)
+
+        mocked.assert_called_once_with(1)
+        self.assertEqual(result, expected)
+
     def test_admin_parcelas_handler_delegates_to_service(self):
         expected = {"source": "postgis", "count": 1, "items": [{"parcela_id": 10}]}
         with patch.object(main, "admin_parcelas", return_value=expected) as mocked:
             result = main.get_admin_parcelas(limit=10, cultivo="vid", activo=True)
 
-        mocked.assert_called_once_with(limit=10, cultivo="vid", activo=True)
+        mocked.assert_called_once_with(limit=10, cultivo="vid", activo=True, sin_asignar=False)
+        self.assertEqual(result, expected)
+
+    def test_admin_parcelas_handler_delegates_sin_asignar(self):
+        expected = {"source": "postgis", "count": 1, "items": [{"parcela_id": 10}]}
+        with patch.object(main, "admin_parcelas", return_value=expected) as mocked:
+            result = main.get_admin_parcelas(
+                limit=10,
+                cultivo=None,
+                activo=True,
+                sin_asignar=True,
+            )
+
+        mocked.assert_called_once_with(
+            limit=10,
+            cultivo=None,
+            activo=True,
+            sin_asignar=True,
+        )
         self.assertEqual(result, expected)
 
     def test_admin_parcela_handler_delegates_to_service(self):

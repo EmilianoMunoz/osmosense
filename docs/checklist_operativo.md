@@ -7,6 +7,14 @@ Checklist corto para levantar, validar y actualizar el sistema sin depender de p
 - Confirmar que existe `.env` con las variables de PostGIS/API usadas por el proyecto.
 - Confirmar que Docker esta disponible si se usa PostGIS local.
 - Confirmar credenciales de Google Earth Engine si se va a ejecutar el pipeline con Sentinel.
+- En producción, confirmar `APP_ENV=production`, `DATABASE_URL`, `AUTH_SECRET`,
+  `ENABLE_LOCAL_FALLBACK=false` y `ENABLE_QUICK_LOGIN=false`.
+- Antes de demo cloud, correr:
+
+```bash
+venv/bin/python backend/scripts/maintenance/rotar_credenciales_cloud.py --confirm
+venv/bin/python backend/scripts/maintenance/run_preflight_cloud.py --check-db
+```
 
 ## 2. Levantar el stack
 
@@ -32,6 +40,10 @@ URLs esperadas:
 
 - API: `http://127.0.0.1:8000/health`
 - Dashboard: `http://127.0.0.1:8501`
+
+En UM-Cloud, el arranque productivo recomendado no es `boot.sh`, sino
+`systemd` con las plantillas de `deployment/systemd/`. El procedimiento completo
+esta en `docs/despliegue_um_cloud.md`.
 
 ## 3. Validar acceso
 
@@ -64,6 +76,24 @@ Smoke PostGIS:
 venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis --check-postgis
 ```
 
+Smoke productor-parcela:
+
+```bash
+venv/bin/python backend/scripts/postgis/smoke_test_productor.py
+```
+
+Smoke CRUD productor-parcela:
+
+```bash
+venv/bin/python backend/scripts/postgis/smoke_test_crud_productor.py --confirm-mutating
+```
+
+Smoke regional:
+
+```bash
+venv/bin/python backend/scripts/postgis/smoke_test_regional.py
+```
+
 Tests:
 
 ```bash
@@ -79,7 +109,7 @@ venv/bin/python -m pytest -q
 ## 7. Problemas comunes
 
 - `Usando fallback local`: revisar API levantada, token/sesion y conexion a PostGIS.
-- `422` al crear usuario: revisar email, password minimo de 6 caracteres y campo requerido para productor.
+- `422` al crear usuario: revisar email, password minimo de 6 caracteres y datos requeridos.
 - `Sin imagen nueva`: estado esperado cuando Sentinel no tiene una fecha valida posterior a la ultima cargada.
 - Mapa desactualizado despues de correr pipeline: usar `Actualizar datos` en admin.
 
@@ -87,4 +117,11 @@ venv/bin/python -m pytest -q
 
 ```bash
 ./boot.sh stop
+```
+
+En cloud:
+
+```bash
+sudo systemctl stop osmosense-dashboard.service
+sudo systemctl stop osmosense-api.service
 ```

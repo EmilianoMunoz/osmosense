@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from frontend.components.branding import render_fullscreen_loader
+from frontend.config import local_fallback_enabled
 from frontend.constants import PRIORIDAD_COLOR, PRIORIDAD_ORDEN_MAPA
 from frontend.data import (
     features_to_frame,
@@ -220,15 +221,15 @@ def regional_summary_sentence(row: pd.Series) -> str:
         elif delta < -1:
             tendencia = "con baja proyectada"
     return (
-        f"Prioridad {str(prioridad).lower()} con score regional {score}. "
-        f"{alta_critica} de las parcelas rankeadas están en alta/crítica; tendencia {tendencia}."
+        f"Prioridad regional {str(prioridad).lower()} con score {score}. "
+        f"{alta_critica} de las parcelas evaluadas están en alta/crítica; tendencia {tendencia}."
     )
 
 
 def render_regional_detail(row: pd.Series) -> None:
     st.subheader(str(row.get("nombre", "UM")))
     st.caption(f"Cuenca: {row.get('cuenca', '-')}")
-    st.write(regional_summary_sentence(row))
+    st.info(regional_summary_sentence(row))
 
     cols = st.columns(4)
     cols[0].metric("Ranking UM", format_metric(row.get("ranking_um"), decimals=0))
@@ -244,7 +245,10 @@ def render_regional_detail(row: pd.Series) -> None:
 
     fecha = row.get("fecha_actual")
     if pd.notna(fecha):
-        st.info(f"Fecha del ranking: {fecha}. Los valores regionales son agregados de parcelas dentro de la UM.")
+        st.caption(
+            f"Fecha del ranking: {fecha}. Los valores son agregados ponderados de "
+            "las parcelas evaluadas dentro de la UM."
+        )
 
     st.markdown("**Composición**")
     st.markdown(f"- Vid: {format_metric(row.get('vid_parcelas'), decimals=0)} parcelas.")
@@ -255,7 +259,7 @@ def render_regional_detail(row: pd.Series) -> None:
 
 
 def render_regional_side_panel(df: pd.DataFrame) -> None:
-    st.subheader("UM seleccionada")
+    st.subheader("Detalle de UM")
     selected_id = st.session_state.get("selected_um_id")
     if selected_id is None:
         st.info("Seleccioná una UM en el mapa para ver el detalle.")
@@ -369,6 +373,7 @@ def render_um_parcelas_table(parcelas: pd.DataFrame) -> None:
 
 def render_regional_focus_tab(df: pd.DataFrame) -> None:
     st.subheader("Foco regional")
+    st.caption("UM que requieren mayor seguimiento por aumento proyectado, concentración alta/crítica o baja cobertura.")
     if df.empty:
         st.info("No hay UM visibles con los filtros actuales.")
         return
@@ -550,7 +555,6 @@ def render_regional_table(df: pd.DataFrame) -> None:
         "nombre",
         "cuenca",
         "prioridad_regional_visual_label",
-        "prioridad_regional",
         "parcelas_total",
         "parcelas_rankeadas",
         "pct_parcelas_rankeadas",
@@ -569,8 +573,7 @@ def render_regional_table(df: pd.DataFrame) -> None:
         "ranking_um": "Ranking UM",
         "nombre": "UM",
         "cuenca": "Cuenca",
-        "prioridad_regional_visual_label": "Prioridad visible",
-        "prioridad_regional": "Prioridad original",
+        "prioridad_regional_visual_label": "Prioridad regional",
         "parcelas_total": "Parcelas",
         "parcelas_rankeadas": "Rankeadas",
         "pct_parcelas_rankeadas": "% rankeadas",
@@ -595,8 +598,11 @@ def render_regional_table(df: pd.DataFrame) -> None:
 
 
 def render_regional_view() -> None:
-    st.title("Prioridad regional por UM")
-    st.caption("UM DGI con parcelas oficiales de vid/olivo dentro de San Rafael")
+    st.title("Seguimiento regional por UM")
+    st.caption(
+        "Unidades de manejo DGI con cultivos objetivo dentro de San Rafael. "
+        "La vista compara zonas para seguimiento regional, no parcelas individuales."
+    )
 
     loading = render_fullscreen_loader("Cargando zonificación regional...")
     with st.spinner("Cargando zonificación regional..."):
@@ -607,16 +613,23 @@ def render_regional_view() -> None:
     source = data.get("source", "desconocida")
     st.sidebar.caption(f"Fuente regional: {source}")
     if not health.get("available"):
-        st.sidebar.error("API no disponible. Se usa fallback local si existe.")
+        if local_fallback_enabled():
+            st.sidebar.error("API no disponible. Se usa fallback local si existe.")
+        else:
+            st.sidebar.error("API/PostGIS no disponible. En producción no hay fallback local.")
     elif source in {"csv", "local"}:
         st.sidebar.warning("Datos regionales desde fallback local/CSV.")
+
+    if df.empty:
+        st.error("No se pudo cargar la zonificación regional desde la API/PostGIS.")
+        return
 
     filtered, color_by = render_regional_sidebar(df)
     filtered_data = filter_zonificacion_geojson(data, set(filtered["zona_id"].astype(int)))
 
     render_regional_metrics(filtered)
-    tab_mapa, tab_foco, tab_parcelas, tab_datos = st.tabs(
-        ["Mapa regional", "Foco regional", "Parcelas de la UM", "Ranking UM"]
+    tab_mapa, tab_foco, tab_datos, tab_parcelas = st.tabs(
+        ["Mapa regional", "Foco regional", "Ranking UM", "Parcelas de la UM"]
     )
     with tab_mapa:
         left, right = st.columns([2.2, 1.0])

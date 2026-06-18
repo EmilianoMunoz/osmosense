@@ -77,8 +77,9 @@ app/main.py
 app/services/rankings.py
 ```
 
-Sirven endpoints de ranking desde PostGIS si existe `DATABASE_URL`; si no,
-usan CSV y GeoJSON locales como fallback.
+Sirven endpoints de ranking desde PostGIS si existe `DATABASE_URL`. Sin
+`DATABASE_URL` pueden usar CSV y GeoJSON locales solo en desarrollo; en
+producción (`APP_ENV=production`) la API exige PostGIS.
 
 ### Dashboard
 

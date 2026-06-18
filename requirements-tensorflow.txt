@@ -1,0 +1,3 @@
+# Dependencia opcional para el experimento de clasificacion con red neuronal.
+# No se incluye en requirements.txt para no hacer pesado el setup operativo.
+tensorflow==2.21.0

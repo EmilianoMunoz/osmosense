@@ -1,10 +1,46 @@
 from __future__ import annotations
 
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
-from frontend.constants import PRIORIDAD_COLOR, PRIORIDAD_LABELS, PRIORIDAD_ORDEN_MAPA
+from frontend.components.client_feedback import (
+    producer_dashboard_headline,
+    risk_change_indicator,
+    risk_level_label,
+)
+from frontend.constants import PRIORIDAD_LABELS
+
+
+def client_top_projected_changes(df: pd.DataFrame, limit: int = 5) -> pd.DataFrame:
+    ranked = df[df["ranking_global"].notna()].copy()
+    required = {"delta_operativo_10d", "riesgo_actual", "riesgo_operativo_10d"}
+    if ranked.empty or not required.issubset(ranked.columns):
+        return pd.DataFrame()
+
+    ranked["delta_operativo_10d"] = pd.to_numeric(
+        ranked["delta_operativo_10d"],
+        errors="coerce",
+    )
+    ranked = ranked[ranked["delta_operativo_10d"].notna()].copy()
+    if ranked.empty:
+        return pd.DataFrame()
+
+    cols = [
+        "parcela_id",
+        "cultivo",
+        "riesgo_actual",
+        "riesgo_operativo_10d",
+        "delta_operativo_10d",
+    ]
+    cols = [col for col in cols if col in ranked.columns]
+    return (
+        ranked.sort_values(
+            ["delta_operativo_10d", "riesgo_actual"],
+            ascending=[False, False],
+        )[cols]
+        .head(limit)
+        .copy()
+    )
 
 
 def client_status_summary(df: pd.DataFrame) -> dict[str, float | int | str]:
@@ -53,24 +89,31 @@ def render_client_field_status(df: pd.DataFrame) -> None:
     else:
         box = st.success
 
-    box(
-        " · ".join(
-            [
-                status,
-                f"{summary['high_or_critical']} de {summary['total']} parcelas en prioridad alta o crítica",
-                f"riesgo medio actual {summary['current_mean']:.1f}",
-                f"proyección media 10 días {summary['projected_mean']:.1f}",
-            ]
-        )
-    )
+    box(producer_dashboard_headline(summary))
 
 
 def _priority_column(df: pd.DataFrame) -> str:
     return "prioridad_visual" if "prioridad_visual" in df.columns else "prioridad"
 
 
+def _render_expected_change(container, value: float | None) -> None:
+    indicator = risk_change_indicator(value)
+    suffix = "" if indicator["text"] == "-" else " puntos"
+    container.markdown(
+        f"""
+        <div style="padding:0.2rem 0;">
+            <div style="font-size:0.78rem; opacity:0.75;">Evolución esperada</div>
+            <div style="font-size:1.55rem; font-weight:700; color:{indicator['color']}; line-height:1.2;">
+                {indicator['text']}{suffix}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_client_field_overview(df: pd.DataFrame) -> None:
-    st.subheader("Lectura del campo")
+    st.subheader("Resumen de situación")
 
     if df.empty:
         st.info("No hay parcelas visibles para resumir.")
@@ -79,68 +122,88 @@ def render_client_field_overview(df: pd.DataFrame) -> None:
     priority_col = _priority_column(df)
     ranked = df[df["ranking_global"].notna()].copy()
 
-    left, right = st.columns([1.05, 1.0])
+    if ranked.empty:
+        st.info("Todavía no hay parcelas evaluadas en esta vista.")
+        return
 
-    with left:
-        if ranked.empty:
-            st.info("Todavía no hay parcelas evaluadas en esta vista.")
-        else:
-            top_cols = [
-                "parcela_id",
-                "cultivo",
-                priority_col,
-                "riesgo_actual",
-                "riesgo_operativo_10d",
-                "delta_operativo_10d",
-                "tendencia_reciente_5d",
-            ]
-            top_cols = [col for col in top_cols if col in ranked.columns]
-            top = ranked.sort_values("riesgo_actual", ascending=False)[top_cols].head(8).copy()
-            for col in ["riesgo_actual", "riesgo_operativo_10d", "delta_operativo_10d", "tendencia_reciente_5d"]:
-                if col in top.columns:
-                    top[col] = top[col].round(1)
-            labels = {
-                "parcela_id": "Parcela",
-                "cultivo": "Cultivo",
-                priority_col: "Prioridad",
-                "riesgo_actual": "Riesgo actual",
-                "riesgo_operativo_10d": "Riesgo 10 días",
-                "delta_operativo_10d": "Cambio 10 días",
-                "tendencia_reciente_5d": "Tendencia",
-            }
-            st.markdown("**Parcelas con mayor riesgo actual**")
-            st.dataframe(top.rename(columns=labels), hide_index=True, width="stretch")
+    summary = client_status_summary(df)
+    high_or_critical = int(summary["high_or_critical"])
+    total = int(summary["total"])
+    projected_change = float(summary["projected_change"])
+    max_risk = ranked["riesgo_actual"].max() if "riesgo_actual" in ranked.columns else pd.NA
 
-    with right:
-        dist = (
-            df[priority_col]
-            .value_counts()
-            .reindex(PRIORIDAD_ORDEN_MAPA)
-            .dropna()
-            .reset_index()
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Parcelas en atención", f"{high_or_critical} de {total}")
+    _render_expected_change(col2, projected_change)
+    col3.metric("Señal más alta", f"{max_risk:.1f}" if pd.notna(max_risk) else "-")
+
+    if high_or_critical:
+        st.warning(
+            "Hay parcelas con señal alta o crítica. Conviene mirarlas primero "
+            "con conocimiento del campo y del manejo reciente."
         )
-        dist.columns = ["prioridad", "parcelas"]
-        dist["prioridad_label"] = dist["prioridad"].map(PRIORIDAD_LABELS).fillna(dist["prioridad"])
-        if dist.empty:
-            st.info("No hay prioridades para graficar.")
-        else:
-            fig = px.bar(
-                dist,
-                x="prioridad_label",
-                y="parcelas",
-                color="prioridad",
-                color_discrete_map=PRIORIDAD_COLOR,
-                category_orders={"prioridad": PRIORIDAD_ORDEN_MAPA},
-            )
-            fig.update_layout(
-                showlegend=False,
-                height=280,
-                margin={"r": 10, "t": 10, "l": 10, "b": 10},
-                xaxis_title="Prioridad",
-                yaxis_title="Parcelas",
-            )
-            st.markdown("**Distribución de prioridad**")
-            st.plotly_chart(fig, width="stretch")
+    else:
+        st.success("No hay parcelas con señal alta o crítica bajo los filtros actuales.")
+
+    st.caption(
+        "El color resume el nivel de atención: verde bajo, amarillo medio, "
+        "naranja alto y rojo crítico. En modo Mis parcelas, la comparación se hace "
+        "solo con tus parcelas visibles. La proyección muestra un escenario de "
+        "continuidad de la condición actual, no una recomendación de riego."
+    )
+
+    top_cols = [
+        "parcela_id",
+        "cultivo",
+        priority_col,
+        "riesgo_actual",
+        "riesgo_operativo_10d",
+        "delta_operativo_10d",
+    ]
+    top_cols = [col for col in top_cols if col in ranked.columns]
+    top = ranked.sort_values("riesgo_actual", ascending=False)[top_cols].head(8).copy()
+    if "riesgo_actual" in top.columns:
+        top["lectura"] = top["riesgo_actual"].apply(risk_level_label)
+    for col in ["riesgo_actual", "riesgo_operativo_10d", "delta_operativo_10d"]:
+        if col in top.columns:
+            top[col] = top[col].round(1)
+    if priority_col in top.columns:
+        top[priority_col] = top[priority_col].map(PRIORIDAD_LABELS).fillna(top[priority_col])
+    labels = {
+        "parcela_id": "Parcela",
+        "cultivo": "Cultivo",
+        priority_col: "Prioridad",
+        "riesgo_actual": "Riesgo actual",
+        "riesgo_operativo_10d": "Riesgo 10 días",
+        "delta_operativo_10d": "Cambio 10 días",
+        "lectura": "Lectura",
+    }
+    st.markdown("**Parcelas para revisar primero**")
+    st.dataframe(top.rename(columns=labels), hide_index=True, width="stretch")
+
+    change = client_top_projected_changes(ranked, limit=5)
+    if not change.empty:
+        for col in ["riesgo_actual", "riesgo_operativo_10d", "delta_operativo_10d"]:
+            if col in change.columns:
+                change[col] = change[col].round(1)
+        st.markdown("**Mayor aumento esperado**")
+        st.caption(
+            "Estas parcelas no necesariamente son las de mayor riesgo actual; "
+            "son las que más podrían cambiar en el escenario a 10 días."
+        )
+        st.dataframe(
+            change.rename(
+                columns={
+                    "parcela_id": "Parcela",
+                    "cultivo": "Cultivo",
+                    "riesgo_actual": "Riesgo actual",
+                    "riesgo_operativo_10d": "Riesgo 10 días",
+                    "delta_operativo_10d": "Cambio esperado",
+                }
+            ),
+            hide_index=True,
+            width="stretch",
+        )
 
     if {"cultivo", "riesgo_actual"}.issubset(ranked.columns) and not ranked.empty:
         st.markdown("**Resumen por cultivo**")

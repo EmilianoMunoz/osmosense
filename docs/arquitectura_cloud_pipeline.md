@@ -1,9 +1,9 @@
 # Arquitectura cloud del pipeline hídrico
 
-Este documento define cómo debe quedar desplegado el sistema en UM-Cloud
-cuando el pipeline local esté estabilizado. No reemplaza la guía de acceso
-`docs/UM_Cloud_Setup_Guide.md`; la complementa con la arquitectura propia
-del proyecto.
+Este documento define cómo debe desplegarse el sistema en UM-Cloud. No
+reemplaza la guía de acceso `docs/UM_Cloud_Setup_Guide.md`; la complementa con
+la arquitectura propia del proyecto. Los comandos concretos de instalacion en
+la VM estan en `docs/despliegue_um_cloud.md`.
 
 ## Objetivo operativo
 
@@ -12,10 +12,11 @@ para parcelas de vid y olivo de San Rafael, Mendoza. Cada ejecución debe:
 
 1. consultar nuevas observaciones Sentinel-2 válidas mediante Google Earth
    Engine;
-2. actualizar el dataset temporal local;
+2. actualizar el dataset temporal;
 3. generar el ranking hídrico con modelos de regresión a 5 y 10 días;
-4. publicar un archivo `latest` consumible por backend/mapa;
-5. dejar logs y estado auditable de la ejecución.
+4. cargar resultados en PostGIS;
+5. publicar el ranking latest por API;
+6. dejar logs y estado auditable de la ejecución.
 
 ## División de responsabilidades
 
@@ -34,9 +35,10 @@ UM-Cloud aloja la aplicación operativa:
 - credenciales/configuración de GEE;
 - datasets tabulares derivados;
 - modelos entrenados;
+- PostGIS operativo;
 - orquestador programado;
 - rankings generados;
-- API FastAPI para servir rankings al dashboard/mapa.
+- API FastAPI para servir rankings al dashboard/mapa;
 - dashboard Streamlit para visualización operativa.
 
 La VM no necesita procesar rasters pesados si GEE mantiene el procesamiento
@@ -50,6 +52,7 @@ Una primera versión puede correr en una única VM Ubuntu de UM-Cloud:
 - Python 3.10+ y `venv`;
 - archivo `.env` con `GEE_PROJECT_ID`;
 - autenticación Earth Engine configurada para el usuario de ejecución;
+- PostGIS configurado;
 - modelos en `backend/models/hidrico_regresion/`;
 - datasets base en `backend/data/`;
 - ejecución programada con `systemd timer` o `cron`.
@@ -57,7 +60,7 @@ Una primera versión puede correr en una única VM Ubuntu de UM-Cloud:
 El comando operativo previsto es:
 
 ```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --skip-if-no-new-date --load-postgis
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --skip-if-no-new-date --load-postgis
 ```
 
 Para pruebas sin consultar GEE:
@@ -73,6 +76,7 @@ venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud
 | Parcelas base        | `backend/data/parcelas/`  | Geometrías/etiquetas oficiales o muestra operativa.|
 | Dataset temporal     | `backend/data/dataset_temporal_hidrico.csv` | Regenerable; no debe versionarse en Git. |
 | Modelos de regresión | `backend/models/hidrico_regresion/*.pkl` | Artefactos pesados; idealmente subir por release/artifact, no Git normal. |
+| Base PostGIS         | `DATABASE_URL` | Fuente operativa geoespacial. |
 | Configuración GEE    | `.env` + credenciales EE | No versionar secretos. |
 
 ## Salidas operativas
@@ -87,27 +91,28 @@ backend/data/logs/pipeline_hidrico_YYYYMMDD_HHMMSS.log
 ```
 
 Estas salidas son artefactos de ejecución y quedan ignoradas por Git. En cloud
-deben conservarse en disco, respaldarse o migrarse luego a base de datos.
+deben conservarse en disco como respaldo, pero la publicación operativa se hace
+desde PostGIS.
 
 ## Publicación del ranking
 
-Fase 1:
-el mapa/backend lee `backend/data/rankings/ranking_hidrico_latest.csv`.
+El flujo vigente publica rankings desde PostGIS cuando `DATABASE_URL` está
+configurado. Los CSV/GeoJSON locales quedan como respaldo y fallback de
+desarrollo. En producción (`APP_ENV=production`) `DATABASE_URL` es obligatorio
+y el fallback local queda deshabilitado.
 
-Fase 2:
-persistir rankings en PostgreSQL/PostGIS o una tabla relacional simple,
-manteniendo histórico por fecha.
-
-Fase 3:
-exponer endpoints FastAPI:
+Endpoints FastAPI principales:
 
 - `GET /rankings/latest`
 - `GET /rankings/latest/geojson`
 - `GET /rankings/{fecha}`
 - `GET /health`
+- `GET /me/rankings/latest/geojson`
+- `GET /clientes/{cliente_id}/rankings/latest/geojson`
+- `GET /regional/um/latest/geojson`
 
-Fase 4:
-dashboard Streamlit consumiendo `/rankings/latest/geojson`.
+El dashboard Streamlit consume esos endpoints con token bearer y permisos por
+rol.
 
 ## Programación automática
 
@@ -144,20 +149,19 @@ Security group inicial:
 | Puerto | Uso            | Origen                   |
 |--------|----------------|--------------------------|
 | 22     | SSH            | `192.168.3.0/24`         |
-| 8000   | FastAPI futura | `192.168.3.0/24` o túnel |
+| 8000   | FastAPI        | `192.168.3.0/24` o tunel |
+| 8501   | Streamlit      | `192.168.3.0/24` o tunel |
 
 ## Decisión actual
 
-No se sube todavía el proyecto a UM-Cloud como ambiente productivo. Primero se
-cierran y validan:
+PostGIS, API y dashboard ya están integrados localmente. Para subir a UM-Cloud
+falta convertir esa integración en operación repetible:
 
-1. orquestador local/cloud;
-2. contrato de archivos de entrada/salida;
-3. ranking histórico y métricas;
-4. documentación mínima de operación;
-5. limpieza de artefactos pesados fuera de Git.
-6. carga del ranking en PostGIS.
+1. provisionar VM y PostGIS;
+2. configurar `.env`, `DATABASE_URL`, `AUTH_SECRET` y credenciales GEE;
+3. cargar parcelas, usuarios, zonificación y ranking inicial;
+4. instalar servicios `systemd` para API, dashboard, pipeline y backup;
+5. validar smoke tests contra API/PostGIS;
+6. definir respaldo de base y artefactos.
 
-Cuando eso esté estable, el despliegue en UM-Cloud debería ser principalmente
-provisionar la VM, instalar dependencias, cargar artefactos y programar el
-orquestador.
+Las plantillas de servicios estan en `deployment/systemd/`.

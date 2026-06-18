@@ -10,11 +10,24 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from backend.app.core.runtime import is_production
+
 
 HASH_ALGORITHM = "pbkdf2_sha256"
 HASH_ITERATIONS = 260_000
 TOKEN_ALGORITHM = "hmac_sha256"
 TOKEN_TTL_SECONDS = 8 * 60 * 60
+MIN_AUTH_SECRET_LENGTH = 32
+WEAK_AUTH_SECRETS = {
+    "cambiar-por-secreto-fuerte",
+    "cambiar-este-secreto",
+    "estres-dev-auth-secret",
+    "reemplazar-por-secreto-largo-de-produccion",
+    "changeme",
+    "change-me",
+    "secret",
+    "password",
+}
 ROLE_ALIASES = {
     "cliente_particular": "productor",
     "cliente_regional": "regional",
@@ -26,9 +39,29 @@ def database_url() -> str | None:
     return os.getenv("DATABASE_URL")
 
 
+def validate_auth_secret(secret: str, production: bool | None = None) -> None:
+    production = is_production() if production is None else production
+    if not production:
+        return
+
+    normalized = secret.strip()
+    if normalized.lower() in WEAK_AUTH_SECRETS:
+        raise RuntimeError("AUTH_SECRET no puede usar un valor de ejemplo en producción.")
+    if len(normalized) < MIN_AUTH_SECRET_LENGTH:
+        raise RuntimeError(
+            f"AUTH_SECRET debe tener al menos {MIN_AUTH_SECRET_LENGTH} caracteres en producción."
+        )
+
+
 def auth_secret() -> str:
     load_dotenv()
-    return os.getenv("AUTH_SECRET") or "estres-dev-auth-secret"
+    secret = os.getenv("AUTH_SECRET")
+    if secret:
+        validate_auth_secret(secret)
+        return secret
+    if is_production():
+        raise RuntimeError("AUTH_SECRET debe configurarse explícitamente en producción.")
+    return "estres-dev-auth-secret"
 
 
 def normalize_role(rol: str) -> str:
@@ -135,12 +168,13 @@ def create_access_token(user: dict[str, Any]) -> str:
 
 
 def verify_access_token(token: str) -> dict[str, Any]:
+    secret = auth_secret()
     try:
         algorithm, body, signature_text = token.split(".", 2)
         if algorithm != TOKEN_ALGORITHM:
             raise ValueError
         expected = hmac.new(
-            auth_secret().encode("utf-8"),
+            secret.encode("utf-8"),
             body.encode("ascii"),
             hashlib.sha256,
         ).digest()

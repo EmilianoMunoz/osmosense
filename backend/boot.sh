@@ -5,6 +5,40 @@ BACKEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$BACKEND_DIR/.." && pwd)"
 cd "$ROOT_DIR"
 
+BOOT_ENV_FILE="${BOOT_ENV_FILE:-.env}"
+for ((idx=1; idx<=$#; idx++)); do
+    if [[ "${!idx}" == "--env-file" ]]; then
+        next_idx=$((idx + 1))
+        if [[ $next_idx -le $# ]]; then
+            BOOT_ENV_FILE="${!next_idx}"
+        fi
+        break
+    fi
+done
+
+load_env_file() {
+    local env_file="${1:-.env}"
+    [[ -f "$env_file" ]] || return 0
+
+    local line key value
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+        key="${BASH_REMATCH[1]}"
+        value="${BASH_REMATCH[2]}"
+        value="${value%\"}"
+        value="${value#\"}"
+        value="${value%\'}"
+        value="${value#\'}"
+        if [[ -z "${!key+x}" ]]; then
+            export "$key=$value"
+        fi
+    done < "$env_file"
+}
+
+load_env_file "$BOOT_ENV_FILE"
+
 API_HOST="${API_HOST:-127.0.0.1}"
 API_PORT="${API_PORT:-8000}"
 STREAMLIT_HOST="${STREAMLIT_HOST:-127.0.0.1}"
@@ -29,9 +63,9 @@ DASHBOARD_ONLY=false
 usage() {
     cat <<EOF
 Uso:
-  ./boot.sh start [--setup] [--all-parcelas] [--update-ranking] [--smoke] [--api-only|--dashboard-only]
+  ./boot.sh start [--env-file .env] [--setup] [--all-parcelas] [--update-ranking] [--smoke] [--api-only|--dashboard-only]
   ./boot.sh stop
-  ./boot.sh restart [--setup] [--all-parcelas] [--update-ranking] [--smoke]
+  ./boot.sh restart [--env-file .env] [--setup] [--all-parcelas] [--update-ranking] [--smoke]
   ./boot.sh status
 
 Variables opcionales:
@@ -65,6 +99,15 @@ while [[ $# -gt 0 ]]; do
         --dashboard-only)
             DASHBOARD_ONLY=true
             ;;
+        --env-file)
+            shift
+            if [[ $# -eq 0 ]]; then
+                echo "--env-file requiere una ruta" >&2
+                exit 2
+            fi
+            BOOT_ENV_FILE="$1"
+            load_env_file "$BOOT_ENV_FILE"
+            ;;
         -h|--help)
             usage
             exit 0
@@ -92,9 +135,14 @@ require_file() {
 }
 
 ensure_env() {
-    if [[ ! -f ".env" ]]; then
+    if [[ "$BOOT_ENV_FILE" != ".env" && ! -f "$BOOT_ENV_FILE" ]]; then
+        echo "No existe $BOOT_ENV_FILE" >&2
+        exit 1
+    fi
+    if [[ "$BOOT_ENV_FILE" == ".env" && ! -f ".env" ]]; then
         log "No existe .env; copiando .env.postgis.example"
         cp .env.postgis.example .env
+        load_env_file "$BOOT_ENV_FILE"
     fi
 }
 

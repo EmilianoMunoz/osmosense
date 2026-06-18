@@ -1,0 +1,17 @@
+[Unit]
+Description=OSMOSENSE Streamlit dashboard
+After=network-online.target osmosense-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=osmosense
+Group=osmosense
+WorkingDirectory=/opt/osmosense
+EnvironmentFile=/opt/osmosense/.env
+ExecStart=/opt/osmosense/venv/bin/streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

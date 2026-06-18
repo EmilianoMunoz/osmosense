@@ -7,8 +7,13 @@ import plotly.express as px
 import streamlit as st
 
 from frontend.constants import ACTION_LABELS, DIAGNOSTIC_LABELS, PRIORIDAD_LABELS
+from frontend.components.client_feedback import (
+    priority_label,
+    producer_feedback_lines,
+    projection_sentence,
+)
 from frontend.data import load_parcela_history
-from frontend.logic import display_delta, display_risk, format_label
+from frontend.logic import display_risk, format_label
 
 
 def risk_sentence(row: pd.Series) -> str:
@@ -20,20 +25,15 @@ def risk_sentence(row: pd.Series) -> str:
 
 
 def client_risk_sentence(row: pd.Series) -> str:
-    priority = format_label(row.get("prioridad_visual", row.get("prioridad")), PRIORIDAD_LABELS)
+    priority = priority_label(row)
     riesgo = row.get("riesgo_actual")
-    pred_5d = display_risk(row, 5, admin_mode=False)
-    pred_10d = display_risk(row, 10, admin_mode=False)
     if pd.isna(riesgo):
         estado = row.get("estado_evaluacion")
         if pd.notna(estado):
-            return f"{estado}. La parcela entrará al análisis cuando exista una lectura satelital válida."
+            return f"{estado}. La parcela entrará al análisis cuando exista una lectura válida."
         return "La parcela no tiene lectura suficiente para calcular estrés hídrico en esta fecha."
 
-    text = f"Prioridad {priority.lower()}. Riesgo actual estimado: {riesgo:.1f}."
-    if pd.notna(pred_5d) and pd.notna(pred_10d):
-        text += f" Proyección operativa: {pred_5d:.1f} a 5 días y {pred_10d:.1f} a 10 días."
-    return text
+    return f"Prioridad {priority.lower()}. {projection_sentence(row, horizon=10)}"
 
 
 def explanation_items(row: pd.Series) -> list[str]:
@@ -186,32 +186,13 @@ def render_client_parcel_summary(row: pd.Series) -> None:
     cols[1].metric("Proyección 5 días", f"{riesgo_5d:.1f}" if pd.notna(riesgo_5d) else "-")
     cols[2].metric("Proyección 10 días", f"{riesgo_10d:.1f}" if pd.notna(riesgo_10d) else "-")
 
-    fecha_lectura = row.get("fecha_lectura")
-    dias = row.get("dias_desde_lectura")
-    if pd.notna(fecha_lectura):
-        if pd.notna(dias):
-            st.info(f"Lectura satelital usada: {fecha_lectura} ({int(dias)} días respecto de la fecha objetivo).")
-        else:
-            st.info(f"Lectura satelital usada: {fecha_lectura}.")
-
-    tendencia = row.get("tendencia_reciente_5d")
-    if pd.notna(tendencia):
-        tendencia = float(tendencia)
-        if tendencia > 2:
-            st.write("El riesgo viene aumentando en las últimas imágenes.")
-        elif tendencia < -2:
-            st.write("El riesgo viene bajando en las últimas imágenes.")
-        else:
-            st.write("El riesgo reciente se mantiene estable.")
-
-    delta_10d = display_delta(row, 10, admin_mode=False)
-    if pd.notna(delta_10d):
-        if delta_10d > 5:
-            st.write("La serie proyectada indica aumento del estrés hídrico en los próximos 10 días.")
-        elif delta_10d < -5:
-            st.write("La serie proyectada indica una posible reducción del estrés hídrico en los próximos 10 días.")
-        else:
-            st.write("La serie proyectada se mantiene relativamente estable en los próximos 10 días.")
+    st.markdown("**Lectura simple**")
+    for line in producer_feedback_lines(row):
+        st.markdown(f"- {line}")
+    st.caption(
+        "Esta lectura sirve para orientar la revisión del productor. La causa final "
+        "debe contrastarse con el manejo y la observación en campo."
+    )
 
 
 if hasattr(st, "dialog"):

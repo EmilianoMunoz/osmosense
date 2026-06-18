@@ -9,6 +9,11 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 
+from frontend.config import local_fallback_enabled
+
+
+RELATION_CACHE_TTL_SECONDS = 1
+
 
 def api_base_url() -> str:
     load_dotenv()
@@ -51,11 +56,73 @@ def load_api_health() -> dict[str, Any]:
     return fetch_api_health(api_base_url())
 
 
-@st.cache_data(show_spinner=False)
-def fetch_geojson_from_api(base_url: str, token: str | None) -> dict[str, Any] | None:
+def _api_unavailable_payload(message: str | None = None) -> dict[str, Any]:
+    return {
+        "source": "api_unavailable",
+        "count": 0,
+        "items": [],
+        "error": message or "API no disponible y fallback local deshabilitado.",
+    }
+
+
+def _api_unavailable_geojson(message: str | None = None) -> dict[str, Any]:
+    payload = _api_unavailable_payload(message)
+    return {
+        "type": "FeatureCollection",
+        "source": payload["source"],
+        "features": [],
+        "count": 0,
+        "error": payload["error"],
+    }
+
+
+def _response_error_message(response: requests.Response | None) -> str:
+    if response is None:
+        return "La API no devolvió una respuesta válida."
     try:
+        payload = response.json()
+    except ValueError:
+        return f"Error HTTP {response.status_code}: {response.text[:160]}"
+
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if isinstance(detail, str):
+        return detail
+    return f"Error HTTP {response.status_code}"
+
+
+def _api_error_payload(response: requests.Response | None) -> dict[str, Any]:
+    return {
+        "source": "api_error",
+        "count": 0,
+        "items": [],
+        "error": _response_error_message(response),
+        "status_code": response.status_code if response is not None else None,
+    }
+
+
+def _api_error_geojson(response: requests.Response | None) -> dict[str, Any]:
+    payload = _api_error_payload(response)
+    return {
+        "type": "FeatureCollection",
+        "source": payload["source"],
+        "features": [],
+        "count": 0,
+        "error": payload["error"],
+        "status_code": payload["status_code"],
+    }
+
+
+@st.cache_data(show_spinner=False)
+def fetch_geojson_from_api(
+    base_url: str,
+    token: str | None,
+    simplify_meters: float | None = None,
+) -> dict[str, Any] | None:
+    try:
+        params = {"simplify_meters": simplify_meters} if simplify_meters is not None else None
         response = requests.get(
             f"{base_url}/rankings/latest/geojson",
+            params=params,
             headers=auth_headers(token),
             timeout=30,
         )
@@ -113,7 +180,7 @@ def fetch_admin_clientes_from_api(
         return None
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=RELATION_CACHE_TTL_SECONDS)
 def fetch_cliente_geojson_from_api(
     base_url: str,
     cliente_id: int,
@@ -127,6 +194,54 @@ def fetch_cliente_geojson_from_api(
         )
         response.raise_for_status()
         return response.json()
+    except requests.HTTPError as exc:
+        return _api_error_geojson(exc.response)
+    except requests.RequestException:
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def fetch_me_from_api(base_url: str, token: str | None) -> dict[str, Any] | None:
+    try:
+        response = requests.get(
+            f"{base_url}/me",
+            headers=auth_headers(token),
+            timeout=5,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException:
+        return None
+
+
+@st.cache_data(show_spinner=False, ttl=RELATION_CACHE_TTL_SECONDS)
+def fetch_me_geojson_from_api(base_url: str, token: str | None) -> dict[str, Any] | None:
+    try:
+        response = requests.get(
+            f"{base_url}/me/rankings/latest/geojson",
+            headers=auth_headers(token),
+            timeout=20,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.HTTPError as exc:
+        return _api_error_geojson(exc.response)
+    except requests.RequestException:
+        return None
+
+
+@st.cache_data(show_spinner=False, ttl=RELATION_CACHE_TTL_SECONDS)
+def fetch_me_parcelas_from_api(base_url: str, token: str | None) -> dict[str, Any] | None:
+    try:
+        response = requests.get(
+            f"{base_url}/me/parcelas",
+            headers=auth_headers(token),
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.HTTPError as exc:
+        return _api_error_payload(exc.response)
     except requests.RequestException:
         return None
 
@@ -220,7 +335,7 @@ def api_error_message(exc: Exception) -> str:
                 messages.append(str(item))
                 continue
             loc = item.get("loc", [])
-            field = str(loc[-1]) if loc else "campo"
+            field = str(loc[-1]) if loc else "dato"
             msg = item.get("msg", "valor inválido")
             messages.append(f"{field}: {msg}")
         if messages:
@@ -250,6 +365,23 @@ def update_usuario(usuario_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     )
     response.raise_for_status()
     fetch_admin_usuarios_from_api.clear()
+    fetch_me_from_api.clear()
+    fetch_me_geojson_from_api.clear()
+    fetch_me_parcelas_from_api.clear()
+    return response.json()
+
+
+def delete_usuario(usuario_id: int) -> dict[str, Any]:
+    response = requests.delete(
+        f"{api_base_url()}/admin/usuarios/{int(usuario_id)}",
+        headers=auth_headers(),
+        timeout=10,
+    )
+    response.raise_for_status()
+    fetch_admin_usuarios_from_api.clear()
+    fetch_me_from_api.clear()
+    fetch_me_geojson_from_api.clear()
+    fetch_me_parcelas_from_api.clear()
     return response.json()
 
 
@@ -277,6 +409,128 @@ def update_cliente(cliente_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     fetch_admin_clientes_from_api.clear()
     fetch_clientes_from_api.clear()
     fetch_cliente_geojson_from_api.clear()
+    fetch_me_geojson_from_api.clear()
+    fetch_me_parcelas_from_api.clear()
+    return response.json()
+
+
+@st.cache_data(show_spinner=False)
+def fetch_admin_parcelas_from_api(
+    base_url: str,
+    token: str | None,
+    limit: int | None = None,
+    cultivo: str | None = None,
+    activo: bool | None = True,
+    sin_asignar: bool = False,
+) -> dict[str, Any] | None:
+    try:
+        params: dict[str, Any] = {"sin_asignar": sin_asignar}
+        if limit:
+            params["limit"] = limit
+        if cultivo:
+            params["cultivo"] = cultivo
+        if activo is not None:
+            params["activo"] = activo
+        response = requests.get(
+            f"{base_url}/admin/parcelas",
+            params=params,
+            headers=auth_headers(token),
+            timeout=20,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException:
+        return None
+
+
+def load_admin_parcelas(
+    limit: int | None = 3000,
+    cultivo: str | None = None,
+    activo: bool | None = True,
+    sin_asignar: bool = False,
+) -> dict[str, Any]:
+    data = fetch_admin_parcelas_from_api(
+        api_base_url(),
+        auth_token(),
+        limit=limit,
+        cultivo=cultivo,
+        activo=activo,
+        sin_asignar=sin_asignar,
+    )
+    if data is None:
+        return {"source": "api_unavailable", "count": 0, "items": []}
+    return admin_disponibles_to_geojson(data)
+
+
+def update_parcela(parcela_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    response = requests.put(
+        f"{api_base_url()}/admin/parcelas/{int(parcela_id)}",
+        json=payload,
+        headers=auth_headers(),
+        timeout=10,
+    )
+    response.raise_for_status()
+    fetch_admin_parcelas_from_api.clear()
+    fetch_admin_parcelas_disponibles_from_api.clear()
+    fetch_geojson_from_api.clear()
+    fetch_cliente_geojson_from_api.clear()
+    fetch_me_geojson_from_api.clear()
+    fetch_me_parcelas_from_api.clear()
+    return response.json()
+
+
+def assign_cliente_parcela(
+    cliente_id: int,
+    parcela_id: int,
+    etiqueta: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"parcela_id": int(parcela_id)}
+    if etiqueta:
+        payload["etiqueta"] = etiqueta
+    response = requests.post(
+        f"{api_base_url()}/admin/clientes/{int(cliente_id)}/parcelas",
+        json=payload,
+        headers=auth_headers(),
+        timeout=10,
+    )
+    response.raise_for_status()
+    fetch_admin_clientes_from_api.clear()
+    fetch_clientes_from_api.clear()
+    fetch_admin_parcelas_from_api.clear()
+    fetch_geojson_from_api.clear()
+    fetch_cliente_geojson_from_api.clear()
+    fetch_me_geojson_from_api.clear()
+    fetch_me_parcelas_from_api.clear()
+    return response.json()
+
+
+def load_admin_cliente_parcelas(cliente_id: int) -> dict[str, Any]:
+    try:
+        response = requests.get(
+            f"{api_base_url()}/admin/clientes/{int(cliente_id)}/parcelas",
+            headers=auth_headers(),
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException:
+        return {"source": "api_unavailable", "count": 0, "items": []}
+
+
+def delete_cliente_parcela(cliente_id: int, parcela_id: int) -> dict[str, Any]:
+    response = requests.delete(
+        f"{api_base_url()}/admin/clientes/{int(cliente_id)}/parcelas/{int(parcela_id)}",
+        headers=auth_headers(),
+        timeout=10,
+    )
+    response.raise_for_status()
+    fetch_admin_clientes_from_api.clear()
+    fetch_clientes_from_api.clear()
+    fetch_admin_parcelas_from_api.clear()
+    fetch_geojson_from_api.clear()
+    fetch_cliente_geojson_from_api.clear()
+    fetch_me_geojson_from_api.clear()
+    fetch_me_parcelas_from_api.clear()
     return response.json()
 
 
@@ -303,6 +557,8 @@ def activar_parcela_disponible(
     fetch_geojson_from_api.clear()
     fetch_clientes_from_api.clear()
     fetch_cliente_geojson_from_api.clear()
+    fetch_me_geojson_from_api.clear()
+    fetch_me_parcelas_from_api.clear()
     return response.json()
 
 
@@ -368,20 +624,71 @@ def load_clientes() -> dict[str, Any]:
     data = fetch_clientes_from_api(base_url, auth_token())
     if data is not None:
         return data
+    if not local_fallback_enabled():
+        return _api_unavailable_payload()
     return load_clientes_local()
 
 
-def load_geojson(cliente_id: int | None = None) -> dict[str, Any]:
-    base_url = api_base_url()
-    if cliente_id is not None:
-        data = fetch_cliente_geojson_from_api(base_url, cliente_id, auth_token())
-        if data is not None:
-            return data
-        return load_cliente_geojson_local(cliente_id)
+def load_me() -> dict[str, Any]:
+    data = fetch_me_from_api(api_base_url(), auth_token())
+    if data is None:
+        return _api_unavailable_payload()
+    return data
 
-    data = fetch_geojson_from_api(base_url, auth_token())
+
+def load_my_geojson() -> dict[str, Any]:
+    token = auth_token()
+    data = fetch_me_geojson_from_api(api_base_url(), token)
     if data is not None:
         return data
+    if token:
+        return _api_unavailable_geojson(
+            "No se pudo consultar la API para cargar las parcelas del productor."
+        )
+    if not local_fallback_enabled():
+        return _api_unavailable_geojson()
+
+    auth_cliente_id = st.session_state.get("auth_cliente_id")
+    if auth_cliente_id is None:
+        return _api_unavailable_geojson("Productor sin cliente_id local para fallback.")
+    return load_cliente_geojson_local(int(auth_cliente_id))
+
+
+def load_my_parcelas() -> dict[str, Any]:
+    token = auth_token()
+    data = fetch_me_parcelas_from_api(api_base_url(), token)
+    if data is None:
+        if token:
+            return _api_unavailable_payload(
+                "No se pudo consultar la API para cargar las parcelas del productor."
+            )
+        return _api_unavailable_payload()
+    return data
+
+
+def load_geojson(
+    cliente_id: int | None = None,
+    simplify_meters: float | None = None,
+) -> dict[str, Any]:
+    base_url = api_base_url()
+    if cliente_id is not None:
+        token = auth_token()
+        data = fetch_cliente_geojson_from_api(base_url, cliente_id, token)
+        if data is not None:
+            return data
+        if token:
+            return _api_unavailable_geojson(
+                "No se pudo consultar la API para cargar la vista del productor."
+            )
+        if not local_fallback_enabled():
+            return _api_unavailable_geojson()
+        return load_cliente_geojson_local(cliente_id)
+
+    data = fetch_geojson_from_api(base_url, auth_token(), simplify_meters=simplify_meters)
+    if data is not None:
+        return data
+    if not local_fallback_enabled():
+        return _api_unavailable_geojson()
     return load_geojson_local()
 
 
@@ -669,6 +976,8 @@ def load_zonificacion_regional() -> tuple[dict[str, Any], pd.DataFrame]:
     data = fetch_regional_um_geojson_from_api(base_url, auth_token())
     if data is not None:
         return normalize_regional_um_geojson(data)
+    if not local_fallback_enabled():
+        return _api_unavailable_geojson(), pd.DataFrame()
     return load_zonificacion_san_rafael()
 
 
@@ -677,6 +986,12 @@ def load_regional_um_parcelas_geojson(um_id: int) -> dict[str, Any]:
     data = fetch_regional_um_parcelas_geojson_from_api(base_url, um_id, auth_token())
     if data is not None:
         return data
+    if not local_fallback_enabled():
+        result = _api_unavailable_geojson()
+        result["um_id"] = int(um_id)
+        result["total_count"] = 0
+        result["ranked_count"] = 0
+        return result
 
     mapping = load_parcelas_um()
     parcela_ids = set(

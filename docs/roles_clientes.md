@@ -1,8 +1,10 @@
-# Roles y clientes
+# Roles y Productores
 
 > Estado: referencia histórica. El flujo actual de login y permisos está en
 > `docs/postgis.md` y en `backend.app.main`. Este documento conserva el diseño
-> conceptual original de roles.
+> conceptual original de roles. Los nombres `clientes` y `cliente_parcela`
+> quedan como compatibilidad técnica; el producto habla de productores y
+> parcelas asignadas.
 
 ## Objetivo
 
@@ -33,18 +35,18 @@ parcelas.parcela_id -> cliente_parcela.parcela_id
 ```
 
 Por ahora `usuarios` deja preparado el vínculo para login real, pero el flujo
-inicial puede operar con selección explícita de cliente en entorno local/demo.
+inicial puede operar con selección explícita de productor en entorno local/demo.
 
 ## CSV local de carga
 
-Clientes:
+Productores:
 
 ```csv
 cliente_id,nombre,tipo,descripcion,activo
 1,Finca Demo,particular,Cliente de prueba,true
 ```
 
-Relación cliente-parcela:
+Relación productor-parcela:
 
 ```csv
 cliente_id,parcela_id,etiqueta
@@ -69,7 +71,7 @@ venv/bin/python scripts/cargar_clientes_parcelas_postgis.py
 El script valida:
 
 - columnas mínimas;
-- `cliente_id` existentes en el CSV de clientes;
+- `cliente_id` existentes en el CSV heredado de perfiles internos;
 - duplicados por `(cliente_id, parcela_id)`.
 
 La integridad contra parcelas reales la garantiza PostGIS mediante foreign key
@@ -85,7 +87,7 @@ GET /clientes/{cliente_id}/rankings/latest/geojson
 ```
 
 `/clientes/{cliente_id}/rankings/latest/geojson` devuelve solo parcelas
-asociadas al cliente. Conserva también parcelas sin ranking latest para que el
+asociadas al productor. Conserva también parcelas sin ranking latest para que el
 usuario vea su universo completo.
 
 ## Próximo paso
@@ -93,6 +95,6 @@ usuario vea su universo completo.
 Adaptar `streamlit_app.py` para:
 
 - mantener vista admin actual;
-- agregar selector local de cliente en modo demo;
+- agregar selector local de productor en modo demo;
 - consumir `/clientes/{cliente_id}/rankings/latest/geojson`;
-- ocultar auditorías técnicas en vista cliente.
+- ocultar auditorías técnicas en vista productor.

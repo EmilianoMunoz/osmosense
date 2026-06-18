@@ -79,6 +79,13 @@ def map_color_config(color_by: str) -> tuple[dict[str, str] | None, dict[str, li
     if color_by == "fuente":
         return None, None, "Fuente"
 
+    if color_by == "seleccionada":
+        return (
+            {True: "#12C2CF", False: "#D7DEE8"},
+            {"seleccionada": [True, False]},
+            "Seleccionada",
+        )
+
     return PRIORIDAD_COLOR, {"prioridad": PRIORIDAD_ORDEN_MAPA}, "Prioridad"
 
 
@@ -158,6 +165,43 @@ def bbox_center_zoom(data: dict[str, Any]) -> tuple[dict[str, float], float]:
         zoom = 8.3
 
     return center, zoom
+
+
+def feature_center(data: dict[str, Any], parcela_id: int) -> dict[str, float] | None:
+    lats: list[float] = []
+    lons: list[float] = []
+
+    def extract_coords(coords: Any) -> None:
+        if not coords:
+            return
+        if isinstance(coords[0], (int, float)):
+            lons.append(float(coords[0]))
+            lats.append(float(coords[1]))
+            return
+        for sub in coords:
+            extract_coords(sub)
+
+    for feature in data.get("features", []):
+        props = feature.get("properties", {})
+        try:
+            current_id = int(props.get("parcela_id", -1))
+        except (TypeError, ValueError):
+            continue
+        if current_id != int(parcela_id):
+            continue
+        geom = feature.get("geometry")
+        if geom is None:
+            return None
+        extract_coords(geom.get("coordinates", []))
+        break
+
+    if not lats or not lons:
+        return None
+
+    return {
+        "lat": (min(lats) + max(lats)) / 2,
+        "lon": (min(lons) + max(lons)) / 2,
+    }
 
 
 def enrich_map_hover(df: pd.DataFrame, admin_mode: bool) -> pd.DataFrame:
@@ -273,7 +317,7 @@ def _inject_legend_anchors(df_anim: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([df_anim, pd.DataFrame(anchors)], ignore_index=True)
 
 
-def risk_animation_frame(df: pd.DataFrame, relative_categories: bool = True) -> pd.DataFrame:
+def risk_animation_frame(df: pd.DataFrame, relative_categories: bool = False) -> pd.DataFrame:
     frames = []
 
     base = df.copy()
@@ -368,9 +412,16 @@ def risk_animation_frame(df: pd.DataFrame, relative_categories: bool = True) -> 
     return pd.concat(frames, ignore_index=True)
 
 
+UI_REVISION_TRANSIENT_COLUMNS = {"seleccionada"}
+
+
 def _ui_revision(map_key: str, color_by: str, df: pd.DataFrame) -> str:
+    stable_df = df.drop(
+        columns=[col for col in UI_REVISION_TRANSIENT_COLUMNS if col in df.columns],
+        errors="ignore",
+    )
     df_hash = hashlib.md5(
-        pd.util.hash_pandas_object(df, index=False).values
+        pd.util.hash_pandas_object(stable_df, index=False).values
     ).hexdigest()[:8]
 
     return f"{map_key}_{color_by}_{df_hash}"
@@ -388,7 +439,9 @@ def render_map(
     numeric_color: str | None = None,
     numeric_color_title: str = "Riesgo",
     risk_animation: bool = False,
-    relative_animation_categories: bool = True,
+    relative_animation_categories: bool = False,
+    on_select: Any = "rerun",
+    highlight_selected: bool = True,
 ) -> int | None:
     if df.empty:
         st.warning("No hay parcelas para mostrar con los filtros actuales.")
@@ -500,7 +553,7 @@ def render_map(
 
     fig.update_mapboxes(uirevision=ui_rev)
 
-    if selected_id is not None:
+    if highlight_selected and selected_id is not None:
         selected_features = [
             feature
             for feature in data.get("features", [])
@@ -528,7 +581,7 @@ def render_map(
         fig,
         use_container_width=True,
         key=map_key,
-        on_select="rerun",
+        on_select=on_select,
         selection_mode="points",
     )
 

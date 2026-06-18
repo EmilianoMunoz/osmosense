@@ -1,4 +1,6 @@
+import os
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -10,11 +12,32 @@ from frontend.logic import (
     review_priority,
 )
 from frontend import data as frontend_data
+from frontend import config as frontend_config
 from frontend.data import filtered_geojson
-from frontend.map import enrich_map_hover, map_hover_data, risk_animation_frame
+from frontend.map import (
+    _ui_revision,
+    enrich_map_hover,
+    feature_center,
+    map_hover_data,
+    risk_animation_frame,
+)
 from frontend.components.charts import parcela_label
-from frontend.components.client_overview import client_status_summary
+from frontend.components.client_feedback import (
+    producer_dashboard_headline,
+    producer_comparison_lines,
+    producer_comparison_summary,
+    producer_feedback_lines,
+    risk_change_indicator,
+    risk_level_label,
+)
+from frontend.components.client_overview import (
+    client_status_summary,
+    client_top_projected_changes,
+)
 from frontend.table_config import CLIENT_FORBIDDEN_COLUMNS, column_labels, table_columns
+from frontend.views.admin.fields import _parse_parcela_ids
+from frontend.views.admin.users import _build_usuario_payload
+from frontend.views.dashboard import ADMIN_ANALYSIS_SECTIONS
 
 
 class FrontendLogicTest(unittest.TestCase):
@@ -27,6 +50,62 @@ class FrontendLogicTest(unittest.TestCase):
         )
 
         self.assertEqual(display_risk(row, 5, admin_mode=True), 65.9)
+
+    def test_production_disables_frontend_local_fallback_and_quick_login(self):
+        with (
+            patch.dict(os.environ, {"APP_ENV": "production"}, clear=True),
+            patch.object(frontend_config, "load_dotenv", return_value=False),
+        ):
+            self.assertFalse(frontend_config.local_fallback_enabled())
+            self.assertFalse(frontend_config.quick_login_enabled())
+
+    def test_load_geojson_returns_api_unavailable_when_fallback_is_disabled(self):
+        with (
+            patch.object(frontend_data, "fetch_geojson_from_api", return_value=None),
+            patch.object(frontend_data, "local_fallback_enabled", return_value=False),
+        ):
+            result = frontend_data.load_geojson()
+
+        self.assertEqual(result["source"], "api_unavailable")
+        self.assertEqual(result["features"], [])
+
+    def test_load_my_geojson_uses_me_endpoint(self):
+        expected = {
+            "source": "postgis",
+            "type": "FeatureCollection",
+            "features": [],
+        }
+
+        with patch.object(frontend_data, "fetch_me_geojson_from_api", return_value=expected):
+            result = frontend_data.load_my_geojson()
+
+        self.assertEqual(result, expected)
+
+    def test_load_my_geojson_does_not_use_local_fallback_with_auth_token(self):
+        with (
+            patch.object(frontend_data, "fetch_me_geojson_from_api", return_value=None),
+            patch.object(frontend_data, "auth_token", return_value="token"),
+            patch.object(frontend_data, "local_fallback_enabled", return_value=True),
+            patch.object(frontend_data, "load_cliente_geojson_local") as mocked_local,
+        ):
+            result = frontend_data.load_my_geojson()
+
+        mocked_local.assert_not_called()
+        self.assertEqual(result["source"], "api_unavailable")
+        self.assertEqual(result["features"], [])
+
+    def test_load_cliente_geojson_does_not_use_local_fallback_with_auth_token(self):
+        with (
+            patch.object(frontend_data, "fetch_cliente_geojson_from_api", return_value=None),
+            patch.object(frontend_data, "auth_token", return_value="token"),
+            patch.object(frontend_data, "local_fallback_enabled", return_value=True),
+            patch.object(frontend_data, "load_cliente_geojson_local") as mocked_local,
+        ):
+            result = frontend_data.load_geojson(cliente_id=1)
+
+        mocked_local.assert_not_called()
+        self.assertEqual(result["source"], "api_unavailable")
+        self.assertEqual(result["features"], [])
 
     def test_display_risk_uses_operational_projection_for_client(self):
         row = pd.Series(
@@ -155,6 +234,56 @@ class FrontendLogicTest(unittest.TestCase):
         self.assertEqual(top["riesgo_categoria"].iloc[0], "critica")
         self.assertEqual(first["riesgo_categoria"].iloc[0], "baja")
 
+    def test_assignment_selection_does_not_reset_map_uirevision(self):
+        base = pd.DataFrame(
+            {
+                "parcela_id": [1, 2],
+                "cultivo": ["vid", "vid"],
+                "seleccionada": [False, False],
+            }
+        )
+        selected = base.copy()
+        selected["seleccionada"] = [True, False]
+        filtered = base[base["parcela_id"] == 1].copy()
+
+        self.assertEqual(
+            _ui_revision("assign_free_parcels_map", "seleccionada", base),
+            _ui_revision("assign_free_parcels_map", "seleccionada", selected),
+        )
+        self.assertNotEqual(
+            _ui_revision("assign_free_parcels_map", "seleccionada", base),
+            _ui_revision("assign_free_parcels_map", "seleccionada", filtered),
+        )
+
+    def test_feature_center_returns_parcela_bbox_center(self):
+        data = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {"parcela_id": 10},
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [
+                                [-68.4, -34.7],
+                                [-68.2, -34.7],
+                                [-68.2, -34.5],
+                                [-68.4, -34.5],
+                                [-68.4, -34.7],
+                            ]
+                        ],
+                    },
+                }
+            ],
+        }
+
+        center = feature_center(data, 10)
+        self.assertIsNotNone(center)
+        self.assertAlmostEqual(center["lat"], -34.6)
+        self.assertAlmostEqual(center["lon"], -68.3)
+        self.assertIsNone(feature_center(data, 99))
+
     def test_client_table_does_not_expose_technical_columns(self):
         available = {
             "parcela_id",
@@ -231,6 +360,140 @@ class FrontendLogicTest(unittest.TestCase):
         self.assertEqual(summary["critical"], 1)
         self.assertEqual(summary["status"], "Atención alta")
         self.assertAlmostEqual(summary["projected_change"], 4.5)
+
+    def test_client_top_projected_changes_orders_by_expected_increase(self):
+        df = pd.DataFrame(
+            {
+                "parcela_id": [1, 2, 3, 4],
+                "cultivo": ["vid", "vid", "olivo", "vid"],
+                "ranking_global": [10, 11, 12, 13],
+                "riesgo_actual": [40.0, 55.0, 30.0, 60.0],
+                "riesgo_operativo_10d": [46.0, 61.0, 42.0, 66.0],
+                "delta_operativo_10d": [6.0, 6.0, 12.0, 6.0],
+            }
+        )
+
+        result = client_top_projected_changes(df, limit=3)
+
+        self.assertEqual(result["parcela_id"].tolist(), [3, 4, 2])
+        self.assertEqual(result["delta_operativo_10d"].tolist(), [12.0, 6.0, 6.0])
+
+    def test_client_feedback_uses_plain_language(self):
+        row = pd.Series(
+            {
+                "prioridad_visual": "alta",
+                "riesgo_actual": 50.0,
+                "riesgo_operativo_10d": 58.0,
+                "delta_operativo_10d": 8.0,
+                "tendencia_reciente_5d": 3.0,
+                "fecha_lectura": "2026-05-26",
+                "dias_desde_lectura": 1,
+            }
+        )
+
+        feedback = " ".join(producer_feedback_lines(row))
+
+        self.assertIn("Estado actual: alto", feedback)
+        self.assertIn("podría aumentar", feedback)
+        self.assertIn("venía empeorando", feedback)
+        self.assertEqual(risk_level_label(56.0), "Crítico")
+
+    def test_risk_change_indicator_uses_arrows_without_positive_sign(self):
+        increase = risk_change_indicator(5.4)
+        decrease = risk_change_indicator(-2.0)
+        stable = risk_change_indicator(0.2)
+
+        self.assertEqual(increase["text"], "▲ 5.4")
+        self.assertEqual(increase["color"], "#d73027")
+        self.assertNotIn("+", increase["text"])
+        self.assertEqual(decrease["text"], "▼ 2.0")
+        self.assertEqual(decrease["color"], "#1a9850")
+        self.assertEqual(stable["text"], "→ 0.2")
+
+    def test_producer_comparison_summary_compares_against_visible_parcels(self):
+        ranked = pd.DataFrame(
+            {
+                "parcela_id": [1, 2, 3],
+                "riesgo_actual": [20.0, 50.0, 80.0],
+                "riesgo_operativo_10d": [25.0, 60.0, 90.0],
+                "delta_operativo_10d": [5.0, 10.0, 10.0],
+            }
+        )
+        row = ranked[ranked["parcela_id"] == 2].iloc[0]
+
+        summary = producer_comparison_summary(row, ranked)
+        lines = " ".join(producer_comparison_lines(summary))
+
+        self.assertEqual(summary["position"], 2)
+        self.assertAlmostEqual(summary["avg_current"], 50.0)
+        self.assertAlmostEqual(summary["diff_current"], 0.0)
+        self.assertIn("promedio", lines)
+
+    def test_producer_dashboard_headline_is_plain_and_actionable(self):
+        headline = producer_dashboard_headline(
+            {
+                "total": 5,
+                "high_or_critical": 2,
+                "critical": 1,
+                "projected_change": 6.0,
+            }
+        )
+
+        self.assertIn("parcelas en atención", headline)
+        self.assertIn("podría empeorar", headline)
+
+    def test_admin_user_payload_requires_productor_identity(self):
+        with self.assertRaisesRegex(ValueError, "apellido"):
+            _build_usuario_payload(
+                email="prod@osmosense.local",
+                nombre="Productor",
+                apellido="",
+                dni="30111222",
+                rol="productor",
+                cliente_id=None,
+                activo=True,
+                password="cliente123",
+                password_confirm="cliente123",
+            )
+
+        with self.assertRaisesRegex(ValueError, "DNI"):
+            _build_usuario_payload(
+                email="prod@osmosense.local",
+                nombre="Productor",
+                apellido="Demo",
+                dni="abc",
+                rol="productor",
+                cliente_id=None,
+                activo=True,
+                password="cliente123",
+                password_confirm="cliente123",
+            )
+
+    def test_admin_user_payload_confirms_password(self):
+        with self.assertRaisesRegex(ValueError, "coinciden"):
+            _build_usuario_payload(
+                email="admin@osmosense.local",
+                nombre="Admin",
+                apellido="",
+                dni="",
+                rol="admin",
+                cliente_id=None,
+                activo=True,
+                password="admin123",
+                password_confirm="admin124",
+            )
+
+    def test_parse_parcela_ids_accepts_commas_newlines_and_deduplicates(self):
+        self.assertEqual(_parse_parcela_ids("10, 11\n10;12"), [10, 11, 12])
+
+        with self.assertRaisesRegex(ValueError, "inválido"):
+            _parse_parcela_ids("10, abc")
+
+    def test_admin_analysis_sections_keep_lazy_order(self):
+        self.assertEqual(
+            ADMIN_ANALYSIS_SECTIONS,
+            ["Estado", "Mapa operativo", "Datos", "Cobertura", "Revisión técnica"],
+        )
 
     def test_client_parcela_label_hides_ranking_and_score(self):
         row = pd.Series(
@@ -357,13 +620,13 @@ class FrontendLogicTest(unittest.TestCase):
         mapping = pd.DataFrame({"um_id": [7], "parcela_id": [1]})
 
         with (
-            unittest.mock.patch.object(
+            patch.object(
                 frontend_data,
                 "fetch_regional_um_parcelas_geojson_from_api",
                 return_value=None,
             ),
-            unittest.mock.patch.object(frontend_data, "load_parcelas_um", return_value=mapping),
-            unittest.mock.patch.object(frontend_data, "load_geojson", return_value=geojson),
+            patch.object(frontend_data, "load_parcelas_um", return_value=mapping),
+            patch.object(frontend_data, "load_geojson", return_value=geojson),
         ):
             result = frontend_data.load_regional_um_parcelas_geojson(7)
 

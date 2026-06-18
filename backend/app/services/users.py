@@ -8,6 +8,7 @@ from backend.app.services.auth import database_url, hash_password, normalize_rol
 
 VALID_ROLES = {"admin", "regional", "productor"}
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+DNI_RE = re.compile(r"^\d{7,9}$")
 
 
 def _db_url() -> str:
@@ -30,6 +31,12 @@ def _validate_role_payload(data: dict[str, Any], current: dict[str, Any] | None 
         if payload["rol"] not in VALID_ROLES:
             raise ValueError("Rol inválido.")
 
+    if "dni" in payload and payload["dni"] is not None:
+        dni = str(payload["dni"]).strip().replace(".", "").replace(" ", "").replace("-", "")
+        payload["dni"] = dni or None
+        if payload["dni"] and not DNI_RE.match(payload["dni"]):
+            raise ValueError("El DNI debe contener entre 7 y 9 dígitos.")
+
     rol = payload.get("rol")
     if rol is None and current is not None:
         rol = normalize_role(str(current["rol"]))
@@ -40,6 +47,22 @@ def _validate_role_payload(data: dict[str, Any], current: dict[str, Any] | None 
 
     if rol in {"admin", "regional"}:
         payload["cliente_id"] = None
+
+    target_active = bool(payload.get("activo", current.get("activo", True) if current is not None else True))
+
+    if rol == "productor" and target_active:
+        apellido = payload.get("apellido")
+        if apellido is None and current is not None:
+            apellido = current.get("apellido")
+        dni = payload.get("dni")
+        if dni is None and current is not None:
+            dni = current.get("dni")
+        if not str(apellido or "").strip():
+            raise ValueError("El apellido es obligatorio para usuarios productores.")
+        if not str(dni or "").strip():
+            raise ValueError("El DNI es obligatorio para usuarios productores.")
+        if not DNI_RE.match(str(dni).strip()):
+            raise ValueError("El DNI debe contener entre 7 y 9 dígitos.")
 
     return payload
 
@@ -170,7 +193,11 @@ def admin_update_usuario(usuario_id: int, data: dict[str, Any]) -> dict[str, Any
         with psycopg.connect(_db_url(), row_factory=dict_row) as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT usuario_id, rol, cliente_id FROM usuarios WHERE usuario_id = %s",
+                    """
+                    SELECT usuario_id, rol, cliente_id, apellido, dni, activo
+                    FROM usuarios
+                    WHERE usuario_id = %s
+                    """,
                     [int(usuario_id)],
                 )
                 current = cur.fetchone()
@@ -178,6 +205,28 @@ def admin_update_usuario(usuario_id: int, data: dict[str, Any]) -> dict[str, Any
                     raise ValueError("Usuario no encontrado.")
 
                 payload = _validate_role_payload(data, dict(current))
+                current_dict = dict(current)
+                current_is_active_admin = (
+                    normalize_role(str(current_dict["rol"])) == "admin"
+                    and bool(current_dict.get("activo", True))
+                )
+                target_role = normalize_role(str(payload.get("rol", current_dict["rol"])))
+                target_active = bool(payload.get("activo", current_dict.get("activo", True)))
+                if current_is_active_admin and (target_role != "admin" or not target_active):
+                    cur.execute(
+                        """
+                        SELECT count(*)
+                        FROM usuarios
+                        WHERE rol = 'admin'
+                          AND activo = true
+                          AND usuario_id <> %s
+                        """,
+                        [int(usuario_id)],
+                    )
+                    other_admins = int(cur.fetchone()["count"])
+                    if other_admins == 0:
+                        raise ValueError("No se puede desactivar o cambiar el último admin activo.")
+
                 allowed = ["email", "nombre", "apellido", "dni", "rol", "cliente_id", "activo"]
                 assignments = []
                 params: list[Any] = []
@@ -227,3 +276,13 @@ def admin_update_usuario(usuario_id: int, data: dict[str, Any]) -> dict[str, Any
         raise ValueError("El productor/campo asociado no existe.") from exc
 
     return {"source": "postgis", "item": _public_user(row)}
+
+
+def admin_deactivate_usuario(usuario_id: int) -> dict[str, Any]:
+    result = admin_update_usuario(int(usuario_id), {"activo": False})
+    return {
+        "source": result["source"],
+        "deleted": True,
+        "usuario_id": int(usuario_id),
+        "item": result["item"],
+    }

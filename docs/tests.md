@@ -26,10 +26,11 @@ Cubre:
 
 - hash y verificacion de passwords;
 - creacion y lectura de access tokens;
+- exigencia de `AUTH_SECRET` explicito en produccion;
 - rechazo de requests sin token o con token invalido;
 - permisos por rol;
-- acceso de productor solo a su propio productor/campo;
-- acceso admin a cualquier productor/campo;
+- acceso de productor solo a sus parcelas asignadas;
+- acceso admin a cualquier cartera de productor;
 - rechazo de regional sobre endpoints de productor.
 
 Ejecutar cuando se modifica:
@@ -50,14 +51,17 @@ Cubre:
 
 - `/health`;
 - `/auth/login`;
+- endpoints `/me`, `/me/rankings/latest/geojson` y `/me/parcelas`;
 - rankings latest;
 - GeoJSON de rankings;
 - estado del pipeline;
 - ranking por fecha;
+- error 503 cuando falta `DATABASE_URL` en modo produccion;
+- validacion de que `/me/*` usa el `cliente_id` del token y no un parametro URL;
 - endpoints regionales;
-- CRUD administrativo de productores/campos;
+- CRUD administrativo de productores y relaciones con parcelas;
 - asignacion de parcelas a productores;
-- CRUD de usuarios;
+- CRUD de usuarios, incluida baja logica por `DELETE`;
 - consulta y activacion de parcelas disponibles.
 
 Estos tests usan mocks para comprobar que `backend/app/main.py` llama al servicio correcto con los parametros esperados. No reemplazan un smoke test contra PostGIS real.
@@ -87,6 +91,9 @@ Cubre:
 - columnas tecnicas visibles en admin;
 - labels legibles de tablas;
 - resumen de estado del productor;
+- validacion de alta/edicion de usuarios productores;
+- parseo de IDs para asignacion manual de parcelas;
+- deshabilitacion de fallback local y accesos rapidos en produccion;
 - filtrado de GeoJSON;
 - lectura de errores de API para mostrar mensajes utiles.
 
@@ -100,6 +107,26 @@ Ejecutar cuando se modifica:
 
 ```bash
 venv/bin/python -m pytest tests/test_frontend_logic.py -q
+```
+
+### `tests/test_cloud_maintenance.py`
+
+Valida utilidades de mantenimiento previas al despliegue cloud.
+
+Cubre:
+
+- parseo de contraseñas explícitas `EMAIL=PASSWORD`;
+- rechazo de contraseñas demasiado cortas;
+- inclusión de usuarios explícitos en la rotación;
+- generación de contraseñas aleatorias con largo esperado.
+
+Ejecutar cuando se modifica:
+
+- `backend/scripts/maintenance/rotar_credenciales_cloud.py`;
+- flujo de preparación de credenciales para demo cloud.
+
+```bash
+venv/bin/python -m pytest tests/test_cloud_maintenance.py -q
 ```
 
 ### `tests/test_map_animation.py`
@@ -131,10 +158,11 @@ Cubre:
 
 - lectura de ranking latest desde CSV cuando no hay PostGIS;
 - generacion de GeoJSON latest;
-- filtrado de ranking por productor/campo;
+- filtrado de ranking por productor;
 - ranking regional por UM;
 - GeoJSON regional;
 - parcelas de una UM;
+- exigencia de `DATABASE_URL` para rankings operativos en produccion;
 - enriquecimiento de calidad con auditorias de vecinos, ruido, historial y outliers;
 - ranking por fecha;
 - errores claros cuando faltan columnas requeridas;
@@ -152,6 +180,69 @@ Ejecutar cuando se modifica:
 venv/bin/python -m pytest tests/test_rankings_service.py -q
 ```
 
+### `tests/test_predictor_validation_report.py`
+
+Valida el reporte reproducible de validacion historica del predictor hidrico.
+
+Cubre:
+
+- agregacion ponderada de metricas por cantidad de parcelas;
+- calculo de tolerancias de error absoluto a 5 y 10 puntos;
+- acierto de direccion de la evolucion;
+- seleccion de fechas a revisar por mayor MAE y menor Spearman.
+
+Ejecutar cuando se modifica:
+
+- `backend/scripts/modeling/generar_reporte_validacion_predictor_hidrico.py`;
+- estructura de los CSV de validacion del predictor;
+- criterios de resumen historico del modelo predictivo.
+
+```bash
+venv/bin/python -m pytest tests/test_predictor_validation_report.py -q
+```
+
+### `tests/test_tensorflow_classifier_experiment.py`
+
+Valida utilidades del experimento TensorFlow/Keras para clasificación.
+
+Cubre:
+
+- preparación de features;
+- separación por `parcela_id` para evitar fuga de información;
+- serialización de métricas;
+- comportamiento esperado cuando TensorFlow no está instalado.
+
+Ejecutar cuando se modifica:
+
+- `backend/scripts/experiments/entrenar_clasificador_tensorflow.py`;
+- configuración de features del clasificador neuronal;
+- dependencias opcionales de `requirements-tensorflow.txt`.
+
+```bash
+venv/bin/python -m pytest tests/test_tensorflow_classifier_experiment.py -q
+```
+
+### `tests/test_cnn_temporal_classifier.py`
+
+Valida utilidades de la CNN temporal multiclase.
+
+Cubre:
+
+- construcción de tensores por parcela y fecha;
+- filtrado de secuencias temporales incompletas;
+- separación train/test por parcela;
+- preparación de datos para clasificación multiclase.
+
+Ejecutar cuando se modifica:
+
+- `backend/scripts/experiments/entrenar_cnn_temporal_clasificacion.py`;
+- dataset temporal multiclase;
+- lógica de secuencias por parcela.
+
+```bash
+venv/bin/python -m pytest tests/test_cnn_temporal_classifier.py -q
+```
+
 ## Smoke test operativo
 
 Los tests anteriores son unitarios o de handlers con mocks. Para validar el flujo con API/PostGIS se usa smoke test:
@@ -161,6 +252,38 @@ venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source
 ```
 
 Este comando valida que el sistema pueda consultar datos operativos reales desde PostGIS.
+
+Smoke productor-parcela:
+
+```bash
+venv/bin/python backend/scripts/postgis/smoke_test_productor.py
+```
+
+Este comando valida, sin modificar datos, que existan productores activos,
+parcelas analizables sin productor, parcelas asignadas al productor de
+desarrollo y que el productor no pueda consultar endpoints admin.
+
+Smoke CRUD productor-parcela:
+
+```bash
+venv/bin/python backend/scripts/postgis/smoke_test_crud_productor.py --confirm-mutating
+```
+
+Este comando modifica temporalmente PostGIS: toma una parcela libre, la asigna
+al productor de desarrollo, verifica que aparezca en `/me/parcelas` y
+`/me/rankings/latest/geojson`, la desasigna y verifica que desaparezca. El flag
+`--confirm-mutating` es obligatorio para evitar ejecuciones accidentales contra
+una base real.
+
+Smoke regional:
+
+```bash
+venv/bin/python backend/scripts/postgis/smoke_test_regional.py
+```
+
+Este comando valida, sin modificar datos, que el usuario regional pueda consultar
+ranking UM, mapa regional y parcelas de una UM, y que no pueda consultar endpoints
+admin ni vistas de productor.
 
 ## Cuándo correr qué
 
@@ -182,9 +305,23 @@ Antes de tocar ranking, PostGIS o estructura de datos:
 venv/bin/python -m pytest tests/test_rankings_service.py -q
 ```
 
+Antes de tocar validacion historica del predictor:
+
+```bash
+venv/bin/python -m pytest tests/test_predictor_validation_report.py -q
+```
+
+Antes de tocar experimentos neuronales:
+
+```bash
+venv/bin/python -m pytest tests/test_tensorflow_classifier_experiment.py tests/test_cnn_temporal_classifier.py -q
+```
+
 Antes de cerrar una tanda grande:
 
 ```bash
 venv/bin/python -m pytest -q
 venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis --check-postgis
+venv/bin/python backend/scripts/postgis/smoke_test_productor.py
+venv/bin/python backend/scripts/postgis/smoke_test_regional.py
 ```

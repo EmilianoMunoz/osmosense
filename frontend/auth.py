@@ -9,6 +9,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from frontend.components.branding import render_logo, render_sidebar_logo
+from frontend.config import quick_login_enabled
 
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -26,14 +27,14 @@ class QuickLoginUser:
 
 QUICK_LOGIN_USERS = {
     "admin": QuickLoginUser(
-        username="admin@smosense.local",
+        username="admin@osmosense.local",
         password="admin123",
         label="Administrador",
         view_mode="Admin",
         rol="admin",
     ),
     "finca": QuickLoginUser(
-        username="productor.vid@smosense.local",
+        username="productor.vid@osmosense.local",
         password="cliente123",
         label="Finca Demo Norte",
         view_mode="Productor",
@@ -41,7 +42,7 @@ QUICK_LOGIN_USERS = {
         cliente_id=1,
     ),
     "olivar": QuickLoginUser(
-        username="productor.olivo@smosense.local",
+        username="productor.olivo@osmosense.local",
         password="cliente123",
         label="Olivar Demo Este",
         view_mode="Productor",
@@ -49,7 +50,7 @@ QUICK_LOGIN_USERS = {
         cliente_id=2,
     ),
     "regional": QuickLoginUser(
-        username="regional@smosense.local",
+        username="regional@osmosense.local",
         password="regional123",
         label="Regional DGI",
         view_mode="Regional",
@@ -182,6 +183,33 @@ def render_login() -> None:
             margin-top: 1rem;
         }
 
+        .role-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.65rem;
+            margin: 0.6rem 0 1.0rem 0;
+        }
+
+        .role-card {
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 8px;
+            padding: 0.75rem;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .role-card strong {
+            display: block;
+            color: #12C2CF;
+            margin-bottom: 0.25rem;
+        }
+
+        .role-card span {
+            display: block;
+            opacity: 0.72;
+            font-size: 0.82rem;
+            line-height: 1.25rem;
+        }
+
         div[data-testid="stForm"] {
             border: none;
             padding: 0;
@@ -242,40 +270,41 @@ def render_login() -> None:
 
                 st.error(message or "Usuario o contraseña inválidos.")
 
-            st.markdown(
-                """
-                <div class="quick-title">Accesos rápidos PostGIS</div>
-                <div class="quick-caption">
-                    Inician sesión contra la API real usando usuarios cargados en PostGIS.
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            if quick_login_enabled():
+                st.markdown(
+                    """
+                    <div class="quick-title">Accesos rápidos</div>
+                    <div class="quick-caption">
+                        Inician sesión contra la API real con usuarios operativos de desarrollo.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-            c1, c2 = st.columns(2)
+                c1, c2 = st.columns(2)
 
-            with c1:
-                if st.button("Productor vid", width="stretch"):
-                    login_quick_user("finca")
+                with c1:
+                    if st.button("Productor vid", width="stretch"):
+                        login_quick_user("finca")
 
-                if st.button("Admin", width="stretch"):
-                    login_quick_user("admin")
+                    if st.button("Admin", width="stretch"):
+                        login_quick_user("admin")
 
-            with c2:
-                if st.button("Productor olivo", width="stretch"):
-                    login_quick_user("olivar")
+                with c2:
+                    if st.button("Productor olivo", width="stretch"):
+                        login_quick_user("olivar")
 
-                if st.button("Regional", width="stretch"):
-                    login_quick_user("regional")
+                    if st.button("Regional", width="stretch"):
+                        login_quick_user("regional")
 
-            st.markdown(
-                """
-                <div class="credentials-caption">
-                    Usuarios PostGIS: admin@smosense.local/admin123 · productor.vid@smosense.local/cliente123 · productor.olivo@smosense.local/cliente123 · regional@smosense.local/regional123
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                st.markdown(
+                    """
+                    <div class="credentials-caption">
+                        Usuarios PostGIS: admin@osmosense.local/admin123 · productor.vid@osmosense.local/cliente123 · productor.olivo@osmosense.local/cliente123 · regional@osmosense.local/regional123
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
 
 def render_auth_sidebar() -> None:

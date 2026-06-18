@@ -1,7 +1,10 @@
 # PostGIS operativo
 
-El objetivo de PostGIS es reemplazar el intercambio operativo por CSV/GeoJSON
-cuando el sistema pase a backend/API/mapa.
+El objetivo de PostGIS es ser la fuente geoespacial operativa del sistema.
+Reemplaza el intercambio principal por CSV/GeoJSON cuando `DATABASE_URL` está
+configurado. Los archivos locales quedan como respaldo y fallback de desarrollo.
+En producción (`APP_ENV=production`) `DATABASE_URL` es obligatorio y el fallback
+CSV/GeoJSON queda deshabilitado.
 
 ## Tablas
 
@@ -46,9 +49,9 @@ Define:
 | `ranking_hidrico`            | Resultado de cada corrida del modelo predictor.           |
 | `ranking_hidrico_latest`     | Último ranking disponible.                                |
 | `ranking_hidrico_latest_geo` | Último ranking unido con geometría para mapa.             |
-| `clientes`                   | Clientes particulares o regionales.                       |
-| `usuarios`                   | Login operativo y vínculo usuario-rol-cliente.            |
-| `cliente_parcela`            | Relación cliente-parcela para vistas particulares.        |
+| `clientes`                   | Perfil interno productor/cartera de parcelas. Conserva nombre legacy. |
+| `usuarios`                   | Login operativo y rol del usuario.                        |
+| `cliente_parcela`            | Relación interna productor-parcela. Conserva nombre legacy. |
 | `zonas_um`                   | Geometría de unidades de manejo regionales.               |
 | `parcela_um`                 | Relación espacial parcela-UM.                             |
 | `ranking_um`                 | Ranking agregado regional por UM.                         |
@@ -102,6 +105,16 @@ venv/bin/python backend/scripts/postgis/setup_postgis_local.py --all-parcelas
 ```
 
 ## Configuración
+
+Variables mínimas de producción:
+
+```text
+APP_ENV=production
+DATABASE_URL=postgresql://usuario:password@host:5432/estres
+AUTH_SECRET=<secreto-fuerte>
+ENABLE_LOCAL_FALLBACK=false
+ENABLE_QUICK_LOGIN=false
+```
 
 Para desarrollo local se agregó:
 
@@ -201,15 +214,16 @@ como hash PBKDF2-SHA256, no en texto plano.
 
 Roles soportados:
 
-| Rol                   | Vista dashboard | Requiere cliente |
+| Rol                   | Vista dashboard | Requiere parcelas asignadas |
 |-----------------------|-----------------|------------------|
 | `admin`               | Admin           | No               |
 | `productor`           | Productor       | Sí               |
 | `regional`            | Regional        | No               |
 
 Cargar usuarios operativos de desarrollo. El script elimina los usuarios
-existentes y recrea los accesos base; no modifica `clientes` ni
-`cliente_parcela`, por lo que conserva las parcelas asignadas a cada campo:
+existentes y recrea los accesos base; no modifica los productores internos
+(`clientes`) ni `cliente_parcela`, por lo que conserva las parcelas asignadas a
+cada productor:
 
 ```bash
 venv/bin/python backend/scripts/postgis/cargar_usuarios_demo_postgis.py
@@ -219,10 +233,10 @@ Usuarios cargados:
 
 | Email | Contraseña | Rol |
 |---|---|---|
-| `admin@smosense.local` | `admin123` | `admin` |
-| `productor.vid@smosense.local` | `cliente123` | `productor` |
-| `productor.olivo@smosense.local` | `cliente123` | `productor` |
-| `regional@smosense.local` | `regional123` | `regional` |
+| `admin@osmosense.local` | `admin123` | `admin` |
+| `productor.vid@osmosense.local` | `cliente123` | `productor` |
+| `productor.olivo@osmosense.local` | `cliente123` | `productor` |
+| `regional@osmosense.local` | `regional123` | `regional` |
 
 El endpoint de login es:
 
@@ -241,6 +255,10 @@ protegidas por rol:
 | `/clientes`                   | `admin`                                  |
 | `/clientes/{id}/rankings/*`   | `admin` o productor propietario          |
 | `/regional/*`                 | `admin` o `regional`                     |
+
+Nota: las rutas `/clientes/*` son compatibilidad interna. En la experiencia de
+producto se muestran como productores y parcelas asignadas. `cliente_id` es hoy
+el identificador interno de la cartera de parcelas del productor.
 
 El dashboard Streamlit guarda el token en sesión y lo envía como:
 

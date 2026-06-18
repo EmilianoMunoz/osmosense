@@ -1,0 +1,12 @@
+[Unit]
+Description=OSMOSENSE PostGIS backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=osmosense
+Group=osmosense
+WorkingDirectory=/opt/osmosense
+EnvironmentFile=/opt/osmosense/.env
+ExecStart=/bin/bash -lc 'mkdir -p /opt/osmosense/backend/data/backups/postgis && pg_dump "$DATABASE_URL" | gzip > "/opt/osmosense/backend/data/backups/postgis/estres_$(date +%%Y%%m%%d_%%H%%M%%S).sql.gz"'

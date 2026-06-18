@@ -23,11 +23,13 @@ data/auditorias/
 backend/data/**/*.csv
 backend/data/**/*.geojson
 backend/data/**/*.gpkg
+backend/data/**/*.md
 backend/data/**/*.parquet
 backend/data/logs/
 backend/data/state/
 backend/data/rankings/
 backend/data/auditorias/
+backend/data/backups/
 
 # GeoJSON grandes o derivados de IDEMendoza
 data/parcelas/*.geojson
@@ -40,6 +42,9 @@ models/*.pkl
 backend/models/hidrico_regresion/
 backend/models/**/*.pkl
 backend/models/*.pkl
+backend/models/**/*.keras
+backend/models/**/*.joblib
+backend/models/clasificador_tensorflow/
 
 # Salidas locales de notebooks/herramientas
 .ipynb_checkpoints/

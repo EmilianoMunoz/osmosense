@@ -7,6 +7,8 @@ import geopandas as gpd
 import pandas as pd
 from dotenv import load_dotenv
 
+from backend.app.core.runtime import is_production
+
 
 RANKING_CSV = "backend/data/rankings/ranking_hidrico_latest.csv"
 RANKINGS_DIR = "backend/data/rankings"
@@ -136,6 +138,16 @@ RISK_SCORE_WEIGHT = 0.30
 def database_url() -> str | None:
     load_dotenv()
     return os.getenv("DATABASE_URL")
+
+
+def _operational_source() -> str:
+    if database_url():
+        return "postgis"
+    if is_production():
+        raise RuntimeError(
+            "DATABASE_URL es obligatorio en producción; fallback CSV deshabilitado."
+        )
+    return "csv"
 
 
 def _clean_value(value: Any) -> Any:
@@ -810,26 +822,51 @@ def latest_from_postgis(limit: int | None = None) -> list[dict[str, Any]]:
     ]
 
 
-def latest_geojson_from_postgis() -> dict[str, Any]:
+def latest_geojson_from_postgis(simplify_meters: float | None = None) -> dict[str, Any]:
     import psycopg
 
+    simplify_value = float(simplify_meters or 0.0)
     query = """
-        SELECT jsonb_build_object(
-            'type', 'FeatureCollection',
-            'features', COALESCE(jsonb_agg(
+        WITH settings AS (
+            SELECT %s::double precision AS simplify_meters
+        ),
+        features AS (
+            SELECT
+                ranking_global,
                 jsonb_build_object(
                     'type', 'Feature',
-                    'geometry', ST_AsGeoJSON(geom)::jsonb,
+                    'geometry',
+                        ST_AsGeoJSON(
+                            CASE
+                                WHEN settings.simplify_meters > 0 THEN
+                                    ST_Transform(
+                                        ST_SimplifyPreserveTopology(
+                                            ST_Transform(t.geom, 3857),
+                                            settings.simplify_meters
+                                        ),
+                                        4326
+                                    )
+                                ELSE t.geom
+                            END,
+                            6
+                        )::jsonb,
                     'properties', to_jsonb(t) - 'geom'
-                )
+                ) AS feature
+            FROM ranking_hidrico_latest_geo t
+            CROSS JOIN settings
+        )
+        SELECT jsonb_build_object(
+            'type', 'FeatureCollection',
+            'geometry_simplify_meters', (SELECT simplify_meters FROM settings),
+            'features', COALESCE(jsonb_agg(feature
                 ORDER BY ranking_global
             ), '[]'::jsonb)
         )
-        FROM ranking_hidrico_latest_geo t
+        FROM features
     """
     with psycopg.connect(database_url()) as conn:
         with conn.cursor() as cur:
-            cur.execute(query)
+            cur.execute(query, [simplify_value])
             result = cur.fetchone()[0]
 
     return _enrich_feature_collection_quality(result)
@@ -1039,7 +1076,7 @@ def regional_um_parcelas_latest_geojson_from_postgis(um_id: int) -> dict[str, An
 
 
 def latest_ranking(limit: int | None = None) -> dict[str, Any]:
-    source = "postgis" if database_url() else "csv"
+    source = _operational_source()
     rows = latest_from_postgis(limit) if source == "postgis" else latest_from_csv(limit)
     return {
         "source": source,
@@ -1048,21 +1085,27 @@ def latest_ranking(limit: int | None = None) -> dict[str, Any]:
     }
 
 
-def latest_geojson() -> dict[str, Any]:
-    source = "postgis" if database_url() else "csv"
-    data = latest_geojson_from_postgis() if source == "postgis" else latest_geojson_from_csv()
+def latest_geojson(simplify_meters: float | None = None) -> dict[str, Any]:
+    source = _operational_source()
+    data = (
+        latest_geojson_from_postgis(simplify_meters=simplify_meters)
+        if source == "postgis"
+        else latest_geojson_from_csv()
+    )
     data["source"] = source
+    if source == "csv" and "geometry_simplify_meters" not in data:
+        data["geometry_simplify_meters"] = None
     return data
 
 
 def clientes() -> dict[str, Any]:
-    source = "postgis" if database_url() else "csv"
+    source = _operational_source()
     rows = clientes_from_postgis() if source == "postgis" else clientes_from_csv()
     return {"source": source, "count": len(rows), "items": rows}
 
 
 def latest_geojson_cliente(cliente_id: int) -> dict[str, Any]:
-    source = "postgis" if database_url() else "csv"
+    source = _operational_source()
     data = (
         latest_geojson_cliente_from_postgis(cliente_id)
         if source == "postgis"
@@ -1073,7 +1116,7 @@ def latest_geojson_cliente(cliente_id: int) -> dict[str, Any]:
 
 
 def regional_um_latest(limit: int | None = None) -> dict[str, Any]:
-    source = "postgis" if database_url() else "csv"
+    source = _operational_source()
     rows = (
         regional_um_latest_from_postgis(limit)
         if source == "postgis"
@@ -1083,7 +1126,7 @@ def regional_um_latest(limit: int | None = None) -> dict[str, Any]:
 
 
 def regional_um_latest_geojson() -> dict[str, Any]:
-    source = "postgis" if database_url() else "csv"
+    source = _operational_source()
     data = (
         regional_um_latest_geojson_from_postgis()
         if source == "postgis"
@@ -1094,7 +1137,7 @@ def regional_um_latest_geojson() -> dict[str, Any]:
 
 
 def regional_um_parcelas_latest_geojson(um_id: int) -> dict[str, Any]:
-    source = "postgis" if database_url() else "csv"
+    source = _operational_source()
     data = (
         regional_um_parcelas_latest_geojson_from_postgis(um_id)
         if source == "postgis"
@@ -1118,14 +1161,12 @@ def _clean_postgis_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def admin_parcelas(
+def _admin_parcelas_query(
     limit: int | None = None,
     cultivo: str | None = None,
     activo: bool | None = True,
-) -> dict[str, Any]:
-    import psycopg
-    from psycopg.rows import dict_row
-
+    sin_asignar: bool = False,
+) -> tuple[str, list[Any]]:
     where = []
     params: list[Any] = []
     if cultivo:
@@ -1134,6 +1175,22 @@ def admin_parcelas(
     if activo is not None:
         where.append("p.activo = %s")
         params.append(activo)
+    if sin_asignar:
+        where.append("p.cultivo_oficial IN ('vid', 'olivo')")
+        where.append("r.parcela_id IS NOT NULL")
+        where.append(
+            """
+            NOT EXISTS (
+                SELECT 1
+                FROM cliente_parcela cp
+                JOIN usuarios u
+                    ON u.cliente_id = cp.cliente_id
+                   AND u.rol = 'productor'
+                   AND u.activo = true
+                WHERE cp.parcela_id = p.parcela_id
+            )
+            """
+        )
 
     query = """
         SELECT
@@ -1145,6 +1202,7 @@ def admin_parcelas(
             p.globalid,
             p.activo,
             p.updated_at,
+            ST_AsGeoJSON(p.geom)::json AS geometry,
             r.fecha_ranking,
             r.ranking_global,
             r.prioridad,
@@ -1159,6 +1217,24 @@ def admin_parcelas(
     if limit:
         query += " LIMIT %s"
         params.append(limit)
+    return query, params
+
+
+def admin_parcelas(
+    limit: int | None = None,
+    cultivo: str | None = None,
+    activo: bool | None = True,
+    sin_asignar: bool = False,
+) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    query, params = _admin_parcelas_query(
+        limit=limit,
+        cultivo=cultivo,
+        activo=activo,
+        sin_asignar=sin_asignar,
+    )
 
     with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
         with conn.cursor() as cur:
@@ -1655,7 +1731,8 @@ def admin_delete_cliente_parcela(cliente_id: int, parcela_id: int) -> dict[str, 
 
 def ranking_by_fecha(fecha: str, limit: int | None = None) -> dict[str, Any]:
     fecha = pd.to_datetime(fecha).strftime("%Y-%m-%d")
-    if not database_url():
+    source = _operational_source()
+    if source == "csv":
         df = _read_ranking_csv(_ranking_csv_path_for_fecha(fecha))
         df = df[df["fecha_actual"] == fecha].sort_values("ranking_global")
         df = _limit_df(df, limit)

@@ -19,7 +19,7 @@ DEFAULT_DATABASE_URL = "postgresql://estres:estres_dev@127.0.0.1:5433/estres"
 
 OPERATIVE_USERS = [
     {
-        "email": "admin@smosense.local",
+        "email": "admin@osmosense.local",
         "nombre": "Administrador",
         "apellido": None,
         "dni": None,
@@ -28,7 +28,7 @@ OPERATIVE_USERS = [
         "password": "admin123",
     },
     {
-        "email": "productor.vid@smosense.local",
+        "email": "productor.vid@osmosense.local",
         "nombre": "Martín",
         "apellido": "Videla",
         "dni": "30111222",
@@ -37,7 +37,7 @@ OPERATIVE_USERS = [
         "password": "cliente123",
     },
     {
-        "email": "productor.olivo@smosense.local",
+        "email": "productor.olivo@osmosense.local",
         "nombre": "Laura",
         "apellido": "Olivera",
         "dni": "28777444",
@@ -46,7 +46,7 @@ OPERATIVE_USERS = [
         "password": "cliente123",
     },
     {
-        "email": "regional@smosense.local",
+        "email": "regional@osmosense.local",
         "nombre": "Regional",
         "apellido": "DGI",
         "dni": None,

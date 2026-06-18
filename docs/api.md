@@ -16,7 +16,7 @@ http://127.0.0.1:8000
 
 ## Fuente de datos
 
-La API usa fuente dual:
+La API usa fuente dual en desarrollo:
 
 1. Si existe `DATABASE_URL`, lee desde PostGIS.
 2. Si no existe `DATABASE_URL`, usa archivos locales:
@@ -28,6 +28,11 @@ backend/data/parcelas/san_rafael_vid_olivo_wgs84.geojson
 
 Esto permite desarrollar localmente sin base de datos y pasar a PostGIS en
 cloud sin cambiar endpoints.
+
+En producción (`APP_ENV=production`) `DATABASE_URL` es obligatorio. Si no está
+configurado, la API responde error y no usa CSV/GeoJSON local. Esta restricción
+evita que el sistema productivo muestre datos viejos o artefactos de respaldo
+sin advertencia.
 
 Si `DATABASE_URL` está definido, la API intenta leer desde PostGIS. Si PostGIS
 falla, el error se reporta explícitamente; no se hace fallback silencioso a CSV
@@ -97,7 +102,7 @@ POST /auth/login
 Body:
 
 ```json
-{"email": "admin@smosense.local", "password": "admin123"}
+{"email": "admin@osmosense.local", "password": "admin123"}
 ```
 
 Valida contra la tabla `usuarios` de PostGIS y devuelve el rol operativo para
@@ -108,7 +113,7 @@ Roles operativos actuales:
 
 - `admin`: administración completa.
 - `regional`: vista agregada por UM/zona.
-- `productor`: parcelas asociadas al productor/campo.
+- `productor`: parcelas asociadas al usuario productor.
 
 Respuesta:
 
@@ -119,7 +124,7 @@ Respuesta:
   "access_token": "...",
   "user": {
     "usuario_id": 1,
-    "email": "admin@smosense.local",
+    "email": "admin@osmosense.local",
     "nombre": "Administrador",
     "apellido": null,
     "dni": null,
@@ -165,6 +170,7 @@ Requiere rol `admin`.
 
 ```http
 GET /rankings/latest/geojson
+GET /rankings/latest/geojson?simplify_meters=2
 ```
 
 Devuelve un `FeatureCollection` con geometría de todas las parcelas oficiales
@@ -172,6 +178,10 @@ vid/olivo y propiedades del ranking cuando existen. Este endpoint es el
 principal para el mapa interactivo.
 
 Requiere rol `admin`.
+
+`simplify_meters` es opcional. Cuando hay PostGIS, simplifica la geometría solo
+para visualización con `ST_SimplifyPreserveTopology` antes de serializar el
+GeoJSON. No modifica la geometría persistida ni el ranking.
 
 Las parcelas con ranking latest tienen:
 
@@ -201,13 +211,16 @@ Con fallback CSV solo devuelve datos si la fecha coincide con el archivo
 `backend/data/rankings/ranking_hidrico_<fecha>.csv`. Con PostGIS puede consultar
 cualquier fecha cargada en `ranking_hidrico`.
 
-### Clientes
+### Productores internos (`/clientes`)
 
 ```http
 GET /clientes
 ```
 
-Devuelve clientes activos con la cantidad de parcelas asignadas.
+Devuelve productores/carteras activos con la cantidad de parcelas asignadas.
+El nombre `/clientes` se mantiene por compatibilidad interna con el schema
+actual, pero en la interfaz y en la tesis debe describirse como productores y
+parcelas asignadas.
 
 En fallback local lee:
 
@@ -228,15 +241,37 @@ cliente_id,parcela_id,etiqueta
 1,38695,Lote norte
 ```
 
-### Ranking latest por cliente
+### Sesión actual (`/me`)
+
+```http
+GET /me
+GET /me/rankings/latest/geojson
+GET /me/parcelas
+```
+
+`GET /me` devuelve la identidad contenida en el token activo. No consulta datos
+de otro usuario ni requiere pasar IDs internos desde el frontend.
+
+`GET /me/rankings/latest/geojson` es la ruta operativa para la vista
+`productor`. El backend obtiene el `cliente_id` desde el token, valida que el
+rol sea `productor` y devuelve solo las parcelas asociadas a ese productor.
+
+`GET /me/parcelas` devuelve el listado tabular de parcelas asignadas al
+productor autenticado, tambien derivado del token.
+
+### Ranking latest por productor
 
 ```http
 GET /clientes/1/rankings/latest/geojson
 ```
 
-Devuelve solo las parcelas asociadas al cliente. El filtrado se hace en backend,
-no en el dashboard. En PostGIS usa `cliente_parcela`; en fallback local usa los
-CSV de `backend/data/clientes`.
+Devuelve solo las parcelas asociadas al productor propietario de ese perfil
+interno. El filtrado se hace en backend, no en el dashboard. En PostGIS usa
+`cliente_parcela` como compatibilidad técnica; en fallback local usa los CSV de
+`backend/data/clientes`.
+
+Este endpoint queda como compatibilidad interna y para uso admin/debug. Para la
+vista Productor se prefiere `/me/rankings/latest/geojson`.
 
 Este endpoint conserva parcelas asociadas aunque no tengan ranking latest,
 marcándolas como `sin_ranking_latest`.
@@ -260,7 +295,7 @@ Payload:
 
 ```json
 {
-  "email": "productor.vid@smosense.local",
+  "email": "productor.vid@osmosense.local",
   "nombre": "Martín",
   "apellido": "Videla",
   "dni": "30111222",
@@ -271,6 +306,9 @@ Payload:
 }
 ```
 
+Para usuarios con rol `productor`, `apellido` y `dni` son obligatorios. El DNI
+se normaliza sin puntos ni guiones y debe contener entre 7 y 9 dígitos.
+
 ```http
 PUT /admin/usuarios/1
 ```
@@ -278,17 +316,26 @@ PUT /admin/usuarios/1
 Permite actualizar `email`, `nombre`, `rol`, `cliente_id`, `activo` y resetear
 contraseña con `password`.
 
-## Admin clientes
+```http
+DELETE /admin/usuarios/1
+```
+
+Desactiva el acceso del usuario (`activo=false`) sin borrar el registro físico.
+Se usa baja lógica para conservar trazabilidad.
+
+El backend impide desactivar o cambiar de rol al último admin activo.
+
+## Admin productores internos
 
 Estos endpoints son de administración operativa y requieren PostGIS
 (`DATABASE_URL`). No tienen fallback CSV porque modifican estado persistente.
-La autenticación real queda pendiente para producción; por ahora son endpoints
-internos para preparar el CRUD del dashboard admin.
+Requieren rol `admin`. El nombre técnico conserva `/admin/clientes`, pero el
+dashboard los presenta como productores y parcelas.
 
 ## Admin parcelas
 
 Estos endpoints permiten administrar el universo operativo de parcelas en
-PostGIS. Sirven para casos como: una parcela actualmente frutal que el cliente
+PostGIS. Sirven para casos como: una parcela actualmente frutal que el productor
 informa que pasará a vid y se quiere incorporar al análisis futuro.
 
 La baja es lógica: `DELETE /admin/parcelas/{id}` marca `activo=false`. No borra
@@ -405,23 +452,27 @@ DELETE /admin/parcelas/900001
 
 Marca la parcela como inactiva.
 
-### Limitación actual
+### Evaluación posterior de parcelas nuevas
 
-El CRUD deja la parcela disponible en PostGIS. Para que una parcela nueva sea
-evaluada automáticamente con la próxima imagen Sentinel, el siguiente ajuste
-necesario es permitir que `generar_dataset_temporal_hidrico.py` tome parcelas
-objetivo desde PostGIS además del GeoJSON local.
+El CRUD deja la parcela disponible en PostGIS. Para que entre a la próxima
+extracción Sentinel, el pipeline debe ejecutarse usando parcelas objetivo desde
+PostGIS:
 
-### Listar clientes
+```bash
+venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --parcel-source postgis --load-postgis
+```
+
+### Listar productores internos
 
 ```http
 GET /admin/clientes
 GET /admin/clientes?limit=100
 ```
 
-Devuelve clientes activos e inactivos con cantidad de parcelas asignadas.
+Devuelve productores/carteras activos e inactivos con cantidad de parcelas
+asignadas.
 
-### Crear cliente
+### Crear productor interno
 
 ```http
 POST /admin/clientes
@@ -445,10 +496,10 @@ particular
 regional
 ```
 
-También se puede enviar `cliente_id` para cargas controladas de demo, aunque en
+También se puede enviar `cliente_id` para cargas controladas, aunque en
 producción debería dejarse autogenerado.
 
-### Actualizar cliente
+### Actualizar productor interno
 
 ```http
 PUT /admin/clientes/1
@@ -463,7 +514,7 @@ Body parcial:
 }
 ```
 
-### Ver parcelas de cliente
+### Ver parcelas de productor
 
 ```http
 GET /admin/clientes/1/parcelas
@@ -472,7 +523,7 @@ GET /admin/clientes/1/parcelas
 Devuelve las parcelas asociadas con datos básicos de cultivo, área y ranking
 latest cuando existe.
 
-### Asociar parcela a cliente
+### Asociar parcela a productor
 
 ```http
 POST /admin/clientes/1/parcelas
@@ -489,7 +540,7 @@ Body:
 
 Si la relación ya existe, actualiza `etiqueta`.
 
-### Quitar parcela de cliente
+### Quitar parcela de productor
 
 ```http
 DELETE /admin/clientes/1/parcelas/38695
@@ -535,7 +586,7 @@ ndvi_mean
 ```
 
 `riesgo_pred_*` son predicciones históricas crudas del modelo ML. Las columnas
-`riesgo_operativo_*` son la proyección conservadora usada por la vista cliente.
+`riesgo_operativo_*` son la proyección conservadora usada por la vista productor.
 
 ## Regional
 
@@ -547,6 +598,7 @@ GET /regional/um/latest?limit=10
 ```
 
 Devuelve el ranking regional agregado por UM, ordenado por `ranking_um`.
+Requiere rol `admin` o `regional`.
 
 ### Último ranking por UM como GeoJSON
 
@@ -556,6 +608,7 @@ GET /regional/um/latest/geojson
 
 Devuelve un `FeatureCollection` con geometría de las UM que tienen cultivos
 oficiales vid/olivo y propiedades agregadas:
+Requiere rol `admin` o `regional`.
 
 ```text
 um_id
@@ -584,6 +637,7 @@ GET /regional/um/0/parcelas/latest/geojson
 Devuelve las parcelas oficiales asociadas a una UM, con la misma estructura de
 propiedades que `/rankings/latest/geojson`. Este endpoint alimenta el drill-down
 regional del dashboard.
+Requiere rol `admin` o `regional`.
 
 Fallback local:
 
