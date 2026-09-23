@@ -1,4 +1,14 @@
-CONTEXT.md
+# Contexto histórico de clasificación satelital
+
+> [!NOTE]
+> Este documento conserva el alcance original de clasificación de cultivos y
+> predicción a 7 días. No representa el flujo operativo vigente de OSMOSENSE.
+> Para el estado actual consultar el [README](README.md), las
+> [decisiones técnicas](DECISIONS.md) y el
+> [contexto de tesis](docs/contexto_tesis.md).
+
+## Alcance original
+
 PROJECT NAME
 
 Satellite Crop Classification + Hydric Stress Forecasting

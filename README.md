@@ -1,476 +1,265 @@
-# Detección y Predicción de Estrés Hídrico en Viñedos y Olivares
-### San Rafael, Mendoza — Tesis de Grado
+# OSMOSENSE
 
-## Descripción
-Plataforma web para monitorear y predecir el estrés hídrico de viñedos y olivares
-en parcelas agrícolas de San Rafael, Mendoza, mediante el procesamiento de imágenes
-satelitales Sentinel-2 y modelos de inteligencia artificial.
+<p align="center">
+  <img src="frontend/assets/logo.png" alt="Logo de OSMOSENSE" width="520" />
+</p>
 
-## Funcionalidades
-- Obtención y filtrado de imágenes Sentinel-2 via Google Earth Engine
-- Cálculo de índices espectrales por parcela
-- Ranking hídrico satelital relativo para vid y olivo
-- Predicción/proyección a 5 y 10 días
-- Visualización web para Admin, Productor y Regional
-- Zonificación regional por UM con ranking agregado
-- API FastAPI con PostGIS operativo y fallback local solo para desarrollo
-- Pipeline local/cloud preparado para automatización
+### Monitoreo y predicción de estrés hídrico en viñedos y olivares
 
-## Requisitos
-- Python 3.10+
-- Cuenta en Google Earth Engine (plan Comunidad / Académico)
-- Ubuntu 22.04 o superior (desarrollado y probado en este entorno)
-- Docker, opcional pero recomendado para PostGIS local
+OSMOSENSE es una plataforma geoespacial de apoyo a decisiones que transforma
+observaciones satelitales Sentinel-2 en indicadores de riesgo hídrico actual,
+proyecciones a 5 y 10 días y rankings de atención para parcelas agrícolas de
+San Rafael, Mendoza.
 
-`psycopg[binary]` está declarado para el flujo PostGIS. En desarrollo se puede
-usar fallback local CSV/GeoJSON, pero en producción (`APP_ENV=production`)
-`DATABASE_URL` es obligatorio.
+El sistema integra procesamiento remoto en Google Earth Engine, modelos de
+aprendizaje automático, persistencia geoespacial en PostGIS, una API FastAPI y
+un dashboard Streamlit con experiencias diferenciadas para productores,
+usuarios regionales y administradores.
 
-## Instalación
+> Proyecto de tesis de grado de Ingeniería en Informática. El objetivo es
+> complementar el criterio agronómico con información satelital comparable y
+> actualizable; no reemplazar mediciones de campo ni indicar automáticamente
+> cuándo regar.
 
-### 1. Clonar el repositorio
-```bash
-git clone https://github.com/tuusuario/estres-hidrico.git
-cd estres-hidrico
+## Problema y propuesta
+
+El seguimiento parcela por parcela puede ser costoso, discontinuo y difícil de
+escalar. Además, cuando el estrés ya es visualmente evidente, parte de la
+capacidad de reacción puede haberse perdido.
+
+OSMOSENSE procesa series temporales multiespectrales para:
+
+- estimar un riesgo hídrico relativo dentro de cada cultivo y fecha;
+- anticipar su evolución a 5 y 10 días;
+- priorizar parcelas y unidades regionales que requieren atención;
+- comunicar fecha de observación, cobertura y confianza del resultado;
+- ofrecer una lectura operativa mediante mapas, tablas y gráficos.
+
+## Capacidades principales
+
+- Extracción de índices espectrales Sentinel-2 mediante Google Earth Engine.
+- Análisis independiente para vid y olivo.
+- Modelos XGBoost de regresión para horizontes de 5 y 10 días.
+- Ranking hídrico actual y proyectado por parcela.
+- Controles de cobertura, vecinos espaciales y persistencia temporal de
+  valores atípicos.
+- Agregación regional por unidades de manejo (UM).
+- API autenticada y autorización por roles.
+- Dashboard geoespacial para `admin`, `productor` y `regional`.
+- Persistencia histórica y consultas espaciales con PostgreSQL/PostGIS.
+- Pipeline y copias de respaldo automatizables mediante servicios `systemd`.
+
+## Resultados de validación
+
+La evaluación histórica multifecha compara predicciones con observaciones
+Sentinel-2 futuras. Los resultados globales documentados son:
+
+| Horizonte | Fechas evaluadas | MAE | RMSE | Spearman | Coincidencia top 10 % |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 5 días | 25 | 4,079 | 5,865 | 0,958 | 83,5 % |
+| 10 días | 25 | 4,659 | 6,663 | 0,951 | 81,7 % |
+
+El MAE se expresa en puntos sobre una escala de riesgo de 0 a 100. Spearman
+mide la capacidad de conservar el orden relativo de las parcelas, una propiedad
+central para generar prioridades de atención.
+
+La metodología, el desglose por cultivo y estación y las limitaciones de la
+evaluación están disponibles en
+[Validación del predictor hídrico](docs/validacion_predictor_hidrico.md) y
+[Modelo predictivo](docs/modelo_predictivo.md).
+
+## Arquitectura
+
+```mermaid
+flowchart LR
+    subgraph Fuentes["Fuentes de datos"]
+        S2["Sentinel-2 SR"]
+        PAR["Parcelas oficiales"]
+        UM["Zonificación regional"]
+    end
+
+    subgraph Procesamiento["Procesamiento y ML"]
+        GEE["Google Earth Engine"]
+        PIPE["Pipeline hídrico"]
+        ML["Modelos XGBoost"]
+        QC["Controles de calidad"]
+    end
+
+    subgraph Plataforma["Plataforma"]
+        PG["PostgreSQL / PostGIS"]
+        API["FastAPI"]
+        UI["Streamlit / Plotly"]
+    end
+
+    S2 --> GEE
+    PAR --> PG
+    UM --> PG
+    GEE --> PIPE
+    PG --> PIPE
+    PIPE --> ML
+    ML --> QC
+    QC --> PG
+    PG --> API
+    API --> UI
 ```
 
-### 2. Crear entorno virtual
+Google Earth Engine concentra el procesamiento multiespectral pesado. PostGIS
+mantiene parcelas, usuarios, observaciones, rankings y geometrías. FastAPI
+desacopla esa persistencia del dashboard y aplica autenticación y permisos.
+
+Los diagramas del pipeline, autenticación, modelo de datos y navegación están
+en [Diagramas del sistema](docs/diagramas.md).
+
+## Experiencias por rol
+
+### Productor
+
+- Consulta exclusivamente las parcelas asociadas a su cuenta.
+- Visualiza condición actual y proyecciones a 5 y 10 días.
+- Compara prioridades, evolución temporal y detalle espectral.
+
+### Regional
+
+- Analiza unidades regionales y cobertura disponible.
+- Identifica concentración de parcelas con riesgo alto o crítico.
+- Profundiza desde el agregado regional hasta las parcelas que lo componen.
+
+### Administrador
+
+- Gestiona usuarios, productores y asignaciones de parcelas.
+- Revisa cobertura, calidad de datos y estado del pipeline.
+- Administra parcelas disponibles y activas.
+
+## Tecnologías
+
+| Área | Tecnologías |
+| --- | --- |
+| Lenguaje y datos | Python, Pandas, NumPy, SciPy |
+| Geoespacial | Google Earth Engine, GeoPandas, Shapely, PostGIS |
+| Machine Learning | XGBoost, scikit-learn, Joblib |
+| Backend | FastAPI, Uvicorn, Psycopg |
+| Dashboard | Streamlit, Plotly |
+| Infraestructura | Docker Compose, Ubuntu, systemd |
+| Calidad | Pytest, smoke tests y auditorías espaciales/temporales |
+
+## Alcance y limitaciones
+
+- Área operativa: San Rafael, Mendoza, Argentina.
+- Cultivos actuales: vid y olivo.
+- Fuente principal de parcelas: datos oficiales de IDEMendoza.
+- Fuente satelital: `COPERNICUS/S2_SR_HARMONIZED`.
+- El riesgo es un proxy satelital relativo por cultivo y fecha.
+- No representa una medición fisiológica directa de campo.
+- No pronostica sequía meteorológica.
+- No prescribe riego ni sustituye el conocimiento del productor o especialista.
+- La calidad depende de cobertura satelital válida, nubosidad y disponibilidad
+  histórica por parcela.
+
+## Estructura del repositorio
+
+```text
+.
+├── backend/
+│   ├── app/          # API y servicios
+│   ├── models/       # Configuración y modelos locales
+│   ├── scripts/      # Pipeline, auditorías, modelado y mantenimiento
+│   └── sql/          # Esquema PostGIS
+├── frontend/         # Dashboard Streamlit
+├── deployment/       # Scripts y unidades systemd
+├── docs/             # Metodología y documentación técnica
+├── legacy/           # Experimentos históricos conservados como referencia
+├── tests/            # Pruebas automatizadas
+├── streamlit_app.py  # Entrada del dashboard
+└── docker-compose.postgis.yml
+```
+
+## Preparar un entorno de desarrollo
+
+### Requisitos
+
+- Python 3.10 o superior.
+- Docker Engine con Docker Compose.
+- Cuenta y proyecto de Google Earth Engine.
+- Ubuntu 22.04 o superior como entorno de referencia.
+
+### Instalación base
+
 ```bash
+git clone https://github.com/EmilianoMunoz/osmosense.git
+cd osmosense
 python3 -m venv venv
 source venv/bin/activate
-```
-
-### 3. Instalar dependencias
-```bash
 pip install -r requirements.txt
 pip install -e .
-```
-
-### 4. Configurar variables de entorno
-Crear un archivo `.env` en la raíz del proyecto:
-
-```text
-GEE_PROJECT_ID=tu-proyecto-gee
-API_BASE_URL=http://127.0.0.1:8000
-APP_ENV=development
-```
-
-Si se usa PostGIS local:
-
-```text
-DATABASE_URL=postgresql://estres:estres_dev@127.0.0.1:5433/estres
-API_BASE_URL=http://127.0.0.1:8000
-AUTH_SECRET=cambiar-este-secreto-local
-ENABLE_LOCAL_FALLBACK=true
-ENABLE_QUICK_LOGIN=true
-```
-
-Ejemplos disponibles:
-
-```text
-.env.local.example
-.env.cloud.example
-.env.postgis.example
-```
-
-### 5. Autenticarse con Google Earth Engine
-```bash
+cp .env.local.example .env
 earthengine authenticate
 ```
 
-## Uso
-
-Referencias rápidas:
-
-```text
-docs/contexto_tesis.md
-docs/diagramas.md
-docs/comandos.md
-docs/estructura_proyecto.md
-docs/FUTURE.md
-backend/README.md
-frontend/README.md
-backend/scripts/README.md
-```
-
-### Recalcular dataset temporal Sentinel-2
-```bash
-venv/bin/python backend/scripts/pipeline/generar_dataset_temporal_hidrico.py --reuse-sample --resume-from-max-date --output backend/data/dataset_temporal_hidrico.csv --start-date 2023-01-01 --end-date 2024-12-31 --step-days 5 --window-days 5 --chunk-size 500
-```
-
-### Ampliar cobertura de parcelas faltantes
-Extraer fecha latest para el próximo lote de parcelas sin observación:
-```bash
-venv/bin/python backend/scripts/pipeline/generar_dataset_temporal_hidrico.py --all-target-parcels --missing-date 2024-12-31 --max-parcels 1000 --output backend/data/dataset_temporal_hidrico.csv --output-sample backend/data/parcelas/muestra_temporal_full_vid_olivo.geojson --start-date 2024-12-31 --end-date 2024-12-31 --step-days 5 --window-days 5 --chunk-size 250 --cloud-threshold 35 --resume
-```
-
-Luego regenerar ranking:
-```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode local
-```
-
-### Generar targets de regresión hídrica
-```bash
-venv/bin/python backend/scripts/pipeline/generar_targets_hidricos_regresion.py
-```
-
-### Reentrenar modelos de ranking hídrico
-```bash
-venv/bin/python backend/scripts/experiments/entrenar_predictores_hidricos_regresion.py --split temporal
-```
-
-### Analizar importancia de variables del predictor
-```bash
-venv/bin/python backend/scripts/modeling/analizar_importancia_predictores_hidricos.py --top-n 10
-```
-
-### Optimizar fórmula final de ranking
-```bash
-venv/bin/python backend/scripts/modeling/optimizar_ranking_hidrico.py --step 0.05 --min-n 50
-```
-
-La configuración calibrada queda en:
-
-```text
-backend/models/ranking_hidrico_config.json
-```
-
-### Auditar cobertura de parcelas
-```bash
-venv/bin/python backend/scripts/audit/auditar_cobertura_parcelas.py
-```
-
-Salidas:
-
-```text
-backend/data/auditoria_cobertura_parcelas.csv
-backend/data/auditoria_cobertura_parcelas.geojson
-```
-
-### Auditar parcelas sin ranking
-```bash
-venv/bin/python backend/scripts/audit/auditar_sin_ranking.py
-```
-
-Salidas:
-
-```text
-backend/data/auditoria_sin_ranking_detalle.csv
-backend/data/auditoria_sin_ranking_resumen.csv
-backend/data/auditoria_sin_ranking_detalle.geojson
-```
-
-### Auditar outliers espaciales por vecinos
-```bash
-venv/bin/python backend/scripts/audit/auditar_vecinos_ranking.py --score-column prioridad_score
-venv/bin/python backend/scripts/audit/auditar_vecinos_ranking.py --score-column riesgo_actual --output-detalle backend/data/auditoria_vecinos_ranking_riesgo_actual.csv --output-resumen backend/data/auditoria_vecinos_ranking_riesgo_actual_resumen.csv --output-geojson backend/data/auditoria_vecinos_ranking_riesgo_actual.geojson
-```
-
-Por defecto compara cada parcela rankeada contra vecinos del mismo cultivo,
-hasta 500 m, usando 6 vecinos máximos y marcando outlier si difiere 35 puntos o
-más de la mediana vecinal.
-
-### Auditar persistencia temporal de outliers
-```bash
-venv/bin/python backend/scripts/audit/auditar_outliers_temporales.py
-```
-
-Usa los outliers espaciales de `riesgo_actual` y revisa si el salto es
-persistente, puntual o indeterminado según el historial de la misma parcela.
-
-### Ejecutar pipeline operativo local/cloud
-Sin consultar GEE, usando el dataset temporal existente:
-```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode local
-```
-
-Actualizando Sentinel-2/GEE antes de rankear:
-```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --skip-if-no-new-date
-```
-
-Actualizando Sentinel-2/GEE usando parcelas activas desde PostGIS:
-```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --parcel-source postgis --skip-if-no-new-date
-```
-
-Actualizando solo una ventana reciente para análisis latest/t-5/t-10:
-```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --recent-days 10 --extract-chunk-size 250 --skip-if-no-new-date
-```
-
-En ejecución real, este modo primero busca hacia atrás la última ventana
-Sentinel válida y usa esa fecha como `t`. Se puede controlar con:
-
-```text
---resolve-latest-valid-date / --no-resolve-latest-valid-date
---latest-lookback-days 30
---latest-min-images 1
-```
-
-Con `--recent-days 10`, `--extract-step-days 5` y `--extract-window-days 5`,
-el modo reciente consulta ventanas cerradas hacia atrás. Si la última fecha
-válida resuelta es 2026-05-31, consulta:
-
-```text
-2026-05-16 -> 2026-05-21
-2026-05-21 -> 2026-05-26
-2026-05-26 -> 2026-05-31
-```
-
-Actualizando Sentinel-2/GEE y cargando el ranking en PostGIS:
-```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --parcel-source postgis --skip-if-no-new-date --load-postgis
-```
-
-Salidas:
-```text
-backend/data/rankings/ranking_hidrico_YYYY-MM-DD.csv
-backend/data/rankings/ranking_hidrico_latest.csv
-backend/data/state/pipeline_hidrico_state.json
-backend/data/logs/pipeline_hidrico_YYYYMMDD_HHMMSS.log
-```
-
-Los datasets y modelos generados son artefactos locales pesados y quedan
-excluidos de Git por `.gitignore`.
-
-La lista actual de artefactos operativos y regenerables está documentada en
-`docs/artefactos_operativos.md`.
-
-El inventario de código vigente, auxiliar y legacy está en
-`docs/inventario_codigo.md`.
-
-## Despliegue cloud
-
-El despliegue objetivo es UM-Cloud. La guía de acceso/provisionamiento está en
-`docs/UM_Cloud_Setup_Guide.md` y la arquitectura operativa del pipeline está en
-`docs/arquitectura_cloud_pipeline.md`. Los pasos concretos para instalar la VM,
-configurar `.env`, levantar servicios `systemd`, programar el pipeline y validar
-smoke tests estan en `docs/despliegue_um_cloud.md`.
-
-## Límite geográfico
-
-El límite local de San Rafael se documenta en `docs/limite_san_rafael.md`.
-Si existe `backend/data/limites/san_rafael.geojson`, el pipeline lo usa para filtrar
-parcelas y construir la región de consulta GEE. Si no existe, usa el bounding
-box operativo como fallback.
-
-## PostGIS
-
-La estructura operativa de base de datos está en `backend/sql/schema_postgis.sql`.
-El flujo de carga está documentado en `docs/postgis.md`.
-
-Levantar PostGIS local:
-
-```bash
-docker compose -f docker-compose.postgis.yml up -d
-```
-
-Aplicar schema y cargar datos operativos:
-
-```bash
-venv/bin/python backend/scripts/postgis/setup_postgis_local.py
-```
-
-Validar conteos:
-
-```bash
-venv/bin/python backend/scripts/postgis/validar_postgis_local.py
-```
-
-Validar API/PostGIS y flujo productor sin modificar datos:
-
-```bash
-venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis --check-postgis
-venv/bin/python backend/scripts/postgis/smoke_test_productor.py
-venv/bin/python backend/scripts/postgis/smoke_test_crud_productor.py --confirm-mutating
-venv/bin/python backend/scripts/postgis/smoke_test_regional.py
-```
-
-Pruebas sin conectarse a una base:
-
-```bash
-venv/bin/python backend/scripts/postgis/aplicar_schema_postgis.py --dry-run
-venv/bin/python backend/scripts/postgis/cargar_parcelas_postgis.py --dry-run
-venv/bin/python backend/scripts/postgis/cargar_ranking_postgis.py --dry-run
-venv/bin/python backend/scripts/postgis/setup_postgis_local.py --dry-run
-```
-
-## API
-
-La API mínima está en `app/main.py` y se documenta en `docs/api.md`.
-
-Ejecutar local:
-
-```bash
-venv/bin/uvicorn backend.app.main:app --reload
-```
-
-Ejecutar local leyendo desde PostGIS:
-
-```bash
-export DATABASE_URL=postgresql://estres:estres_dev@127.0.0.1:5433/estres
-venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
-```
-
-Endpoints principales:
-
-```text
-GET /health
-POST /auth/login
-GET /me
-GET /me/rankings/latest/geojson
-GET /me/parcelas
-GET /rankings/latest
-GET /rankings/latest/geojson
-GET /rankings/{fecha}
-GET /clientes
-GET /clientes/{cliente_id}/rankings/latest/geojson
-GET /admin/parcelas
-GET /admin/parcelas/disponibles
-GET /admin/parcelas/{parcela_id}
-POST /admin/parcelas
-POST /admin/parcelas/{parcela_id}/activar-disponible
-PUT /admin/parcelas/{parcela_id}
-DELETE /admin/parcelas/{parcela_id}
-GET /admin/clientes
-POST /admin/clientes
-PUT /admin/clientes/{cliente_id}
-GET /admin/clientes/{cliente_id}/parcelas
-POST /admin/clientes/{cliente_id}/parcelas
-DELETE /admin/clientes/{cliente_id}/parcelas/{parcela_id}
-GET /admin/usuarios
-POST /admin/usuarios
-PUT /admin/usuarios/{usuario_id}
-GET /regional/um/latest
-GET /regional/um/latest/geojson
-GET /regional/um/{um_id}/parcelas/latest/geojson
-```
-
-Las rutas `/clientes/*` y `/admin/clientes/*` son compatibilidad interna para
-la relación productor-parcela vigente. En la experiencia de producto se muestran
-como productores y parcelas asignadas.
-
-## Dashboard
-
-El dashboard Streamlit está en `streamlit_app.py` y se documenta en
-`docs/dashboard.md`.
-
-Levantar entorno local completo:
+Con los artefactos operativos disponibles, el entorno completo se inicia con:
 
 ```bash
 ./boot.sh start
 ```
 
-Primera carga o recarga completa de PostGIS:
+Los datasets geoespaciales, rankings y modelos binarios pesados son artefactos
+locales o regenerables y no se versionan. La preparación de PostGIS y la
+reconstrucción de datos se explican en:
 
-```bash
-./boot.sh start --setup --all-parcelas --smoke
-```
+- [Reconstrucción del dataset desde IDEMendoza](docs/reconstruccion_dataset_desde_ide.md)
+- [Persistencia PostGIS](docs/postgis.md)
+- [Comandos operativos](docs/comandos.md)
+- [Artefactos operativos](docs/artefactos_operativos.md)
 
-Consultar estado:
+## Verificación
 
-```bash
-./boot.sh status
-```
-
-Detener API y dashboard:
-
-```bash
-./boot.sh stop
-```
-
-Consume `/rankings/latest/geojson` si la API está levantada. Si no, usa CSV y
-GeoJSON locales.
-
-Flujo manual equivalente con PostGIS:
-
-```bash
-docker compose -f docker-compose.postgis.yml up -d
-venv/bin/python backend/scripts/postgis/setup_postgis_local.py --all-parcelas
-venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
-venv/bin/streamlit run streamlit_app.py
-```
-
-En el dashboard, la barra lateral debe indicar:
-
-```text
-Fuente: postgis
-```
-
-El login del dashboard usa `POST /auth/login` contra PostGIS cuando la API está
-activa. Los accesos rápidos de desarrollo siguen disponibles en la pantalla de
-login.
-
-## Verificación mínima
-
-Ejecutar tests rápidos de ranking/API:
+Pruebas automatizadas:
 
 ```bash
 venv/bin/python -m pytest -q
 ```
 
-Ejecutar smoke test operativo contra la API levantada:
+Validación operativa contra una API y PostGIS ya levantados:
 
 ```bash
 venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis
 ```
 
-Validar PostGIS directo:
+El alcance de cada prueba está documentado en
+[Pruebas y validaciones](docs/tests.md).
 
-```bash
-venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --skip-api --check-postgis
-```
+## Despliegue
 
-Validar fallback local CSV/GeoJSON:
+El sistema fue preparado y validado en una VM Ubuntu de UM-Cloud con PostGIS en
+Docker, FastAPI y Streamlit como servicios `systemd`, ejecución programada del
+pipeline y copias de respaldo automatizadas.
 
-```bash
-venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --skip-api --check-local-fallback
-```
+La documentación operativa de despliegue se conserva separada del flujo de
+inicio rápido. Antes de reutilizarla en otro entorno deben revisarse accesos,
+redes, credenciales y políticas institucionales.
 
-Ese fallback es una validación de desarrollo. En producción se configura
-`APP_ENV=production`, `DATABASE_URL`, `AUTH_SECRET`,
-`ENABLE_LOCAL_FALLBACK=false` y `ENABLE_QUICK_LOGIN=false`.
+## Documentación
 
-Validación completa local, con API y PostGIS:
+La documentación está organizada por producto, metodología, datos, seguridad y
+operación en el [índice de documentación](docs/README.md).
 
-```bash
-venv/bin/python backend/scripts/postgis/smoke_test_operativo.py --require-source postgis --check-postgis --check-local-fallback
-```
+Entradas recomendadas:
 
-## Artefactos y Git
+- [Contexto de tesis](docs/contexto_tesis.md)
+- [Decisiones técnicas](DECISIONS.md)
+- [Modelo predictivo](docs/modelo_predictivo.md)
+- [Validación del predictor](docs/validacion_predictor_hidrico.md)
+- [Arquitectura cloud del pipeline](docs/arquitectura_cloud_pipeline.md)
+- [API](docs/api.md)
+- [Dashboard](docs/dashboard.md)
+- [Seguridad y autenticación](docs/seguridad_auth.md)
 
-Versionar:
+## Estado del proyecto
 
-```text
-backend/app/
-backend/scripts/
-backend/sql/
-backend/models/ranking_hidrico_config.json
-frontend/
-docs/
-tests/
-docker-compose.postgis.yml
-.env.local.example
-.env.cloud.example
-.env.postgis.example
-```
+Los flujos principales de extracción satelital, cálculo de indicadores,
+predicción, ranking, persistencia, API y visualización están implementados. Las
+líneas de evolución se mantienen en [Trabajo futuro](docs/FUTURE.md).
 
-No versionar:
+## Autor
 
-```text
-.env
-venv/
-backend/data/**/*.csv
-backend/data/**/*.geojson
-backend/data/logs/
-backend/data/state/
-backend/data/rankings/
-backend/data/auditorias/
-backend/data/parcelas/*.geojson
-backend/models/**/*.pkl
-backend/models/hidrico_regresion/
-```
-
-Los CSV/GeoJSON grandes o derivados se regeneran con el pipeline y están
-cubiertos por `.gitignore`.
+Desarrollado por **Emiliano Muñoz** como proyecto de tesis de grado de
+Ingeniería en Informática.

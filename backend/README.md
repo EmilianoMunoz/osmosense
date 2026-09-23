@@ -1,4 +1,4 @@
-# Backend
+# Backend de OSMOSENSE
 
 Backend operativo del sistema de estrés hídrico. Contiene API, pipeline,
 modelos, datos operativos, schema PostGIS y scripts de mantenimiento.

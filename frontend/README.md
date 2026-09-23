@@ -1,4 +1,4 @@
-# Frontend
+# Frontend de OSMOSENSE
 
 Frontend Streamlit del sistema. La entrada se mantiene en la raíz:
 

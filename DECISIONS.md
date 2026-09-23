@@ -1,4 +1,4 @@
-# Decisiones Técnicas — Estrés Hídrico San Rafael
+# OSMOSENSE — Decisiones técnicas
 
 
 ## Objetivo Del Producto
