@@ -19,6 +19,19 @@ from frontend.constants import (
 RISK_ANIMATION_ORDER = ["baja", "media", "alta", "critica", "sin ranking"]
 NO_RIEGO_WORSENING_FACTOR = 1.12
 
+HOVER_LABELS = {
+    "cultivo": "Cultivo",
+    "prioridad_visual_label": "Prioridad",
+    "prioridad_score": "Score de prioridad",
+    "riesgo_actual": "Riesgo actual",
+    "riesgo_5_dias": "Riesgo a 5 días",
+    "riesgo_10_dias": "Riesgo a 10 días",
+    "delta_10_dias": "Cambio a 10 días",
+    "ranking_global": "Ranking global",
+    "estado_cobertura": "Cobertura",
+    "estado_evaluacion": "Evaluación",
+    "confianza_lectura": "Confianza",
+}
 
 def risk_category(value: Any) -> str:
     if pd.isna(value):
@@ -298,6 +311,142 @@ def map_hover_data(admin_mode: bool, df: pd.DataFrame) -> dict[str, Any]:
     return {column: value for column, value in hover_data.items() if column in df.columns}
 
 
+def compact_map_geojson(
+    data: dict[str, Any],
+    parcela_ids: set[int],
+) -> dict[str, Any]:
+    """Keep only geometry and the feature key required by Plotly."""
+    features = []
+
+    for feature in data.get("features", []):
+        parcela_id = feature.get("properties", {}).get("parcela_id")
+
+        try:
+            parcela_id_int = int(parcela_id)
+        except (TypeError, ValueError):
+            continue
+
+        if parcela_id_int not in parcela_ids:
+            continue
+
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": feature.get("geometry"),
+                "properties": {"parcela_id": parcela_id_int},
+            }
+        )
+
+    return {"type": "FeatureCollection", "features": features}
+
+
+def _step_colorscale(colors: list[str]) -> list[list[Any]]:
+    if len(colors) == 1:
+        return [[0.0, colors[0]], [1.0, colors[0]]]
+
+    scale: list[list[Any]] = []
+    last_index = len(colors) - 1
+    for index, color in enumerate(colors):
+        lower = 0.0 if index == 0 else (index - 0.5) / last_index
+        upper = 1.0 if index == last_index else (index + 0.5) / last_index
+        scale.extend([[lower, color], [upper, color]])
+    return scale
+
+
+def _hover_template(
+    hover_data: dict[str, Any],
+    custom_columns: list[str],
+) -> str:
+    lines = ["<b>Parcela %{location}</b>"]
+
+    for column, display in hover_data.items():
+        if display is False or column == "parcela_id" or column not in custom_columns:
+            continue
+
+        index = custom_columns.index(column)
+        value = f"%{{customdata[{index}]"
+        if isinstance(display, str) and display.startswith(":"):
+            value += display
+        value += "}"
+        label = HOVER_LABELS.get(column, column.replace("_", " ").capitalize())
+        lines.append(f"{label}: {value}")
+
+    return "<br>".join(lines) + "<extra></extra>"
+
+
+def categorical_map_figure(
+    data: dict[str, Any],
+    df: pd.DataFrame,
+    *,
+    color_by: str,
+    color_map: dict[Any, str],
+    category_order: list[Any],
+    hover_data: dict[str, Any],
+    center: dict[str, float],
+    zoom: float,
+    opacity: float,
+) -> go.Figure:
+    """Build one geometry trace instead of duplicating GeoJSON per category."""
+    frame = df.copy()
+    frame[color_by] = frame[color_by].fillna("sin ranking")
+
+    observed = frame[color_by].drop_duplicates().tolist()
+    categories = [value for value in category_order if value in observed]
+    categories.extend(value for value in observed if value not in categories)
+    category_codes = {value: index for index, value in enumerate(categories)}
+    colors = [color_map.get(value, "#94a3b8") for value in categories]
+
+    custom_columns = ["parcela_id"]
+    custom_columns.extend(
+        column
+        for column, display in hover_data.items()
+        if display is not False and column not in custom_columns and column in frame.columns
+    )
+    custom_frame = frame[custom_columns].astype(object)
+    custom_frame = custom_frame.where(pd.notna(custom_frame), None)
+
+    fig = go.Figure(
+        go.Choroplethmapbox(
+            geojson=data,
+            locations=frame["parcela_id"].astype(int),
+            z=frame[color_by].map(category_codes),
+            featureidkey="properties.parcela_id",
+            colorscale=_step_colorscale(colors),
+            zmin=0,
+            zmax=max(len(categories) - 1, 1),
+            customdata=custom_frame.to_numpy(),
+            hovertemplate=_hover_template(hover_data, custom_columns),
+            marker_opacity=opacity,
+            marker_line_width=0,
+            showscale=False,
+            showlegend=False,
+        )
+    )
+
+    for category, color in zip(categories, colors):
+        fig.add_trace(
+            go.Scattermapbox(
+                lat=[None],
+                lon=[None],
+                mode="markers",
+                marker={"size": 10, "color": color},
+                name=str(category),
+                hoverinfo="skip",
+                showlegend=True,
+            )
+        )
+
+    fig.update_layout(
+        height=650,
+        mapbox={
+            "center": {"lat": center["lat"], "lon": center["lon"]},
+            "zoom": zoom,
+            "style": "carto-positron",
+        },
+    )
+    return fig
+
+
 def _inject_legend_anchors(df_anim: pd.DataFrame) -> pd.DataFrame:
     categories = ["baja", "media", "alta", "critica", "sin ranking"]
     days = df_anim["dia_proyeccion"].unique()
@@ -450,6 +599,11 @@ def render_map(
 
     df_map = enrich_map_hover(df, admin_mode)
 
+    parcela_ids = set(
+        pd.to_numeric(df_map["parcela_id"], errors="coerce").dropna().astype(int)
+    )
+    map_data = compact_map_geojson(data, parcela_ids)
+
     center_lat = center["lat"] if center else -34.6
     center_lon = center["lon"] if center else -68.35
 
@@ -474,7 +628,7 @@ def render_map(
 
         fig = px.choropleth_mapbox(
             df_anim,
-            geojson=data,
+            geojson=map_data,
             locations="parcela_id",
             featureidkey="properties.parcela_id",
             color="riesgo_categoria",
@@ -502,7 +656,7 @@ def render_map(
     elif numeric_color is not None and numeric_color in df_map.columns:
         fig = px.choropleth_mapbox(
             df_map,
-            geojson=data,
+            geojson=map_data,
             locations="parcela_id",
             featureidkey="properties.parcela_id",
             color=numeric_color,
@@ -528,23 +682,35 @@ def render_map(
         legend_title = numeric_color_title
 
     else:
-        fig = px.choropleth_mapbox(
-            df_map,
-            geojson=data,
-            locations="parcela_id",
-            featureidkey="properties.parcela_id",
-            color=color_by,
-            color_discrete_map=color_map,
-            category_orders=category_orders,
-            hover_name="parcela_id",
-            hover_data=hover_data,
-            custom_data=["parcela_id"],
-            center={"lat": center_lat, "lon": center_lon},
-            zoom=zoom,
-            opacity=0.68,
-            height=650,
-            mapbox_style="carto-positron",
-        )
+        if color_map is not None:
+            fig = categorical_map_figure(
+                map_data,
+                df_map,
+                color_by=color_by,
+                color_map=color_map,
+                category_order=(category_orders or {}).get(color_by, []),
+                hover_data=hover_data,
+                center={"lat": center_lat, "lon": center_lon},
+                zoom=zoom,
+                opacity=0.68,
+            )
+        else:
+            fig = px.choropleth_mapbox(
+                df_map,
+                geojson=map_data,
+                locations="parcela_id",
+                featureidkey="properties.parcela_id",
+                color=color_by,
+                category_orders=category_orders,
+                hover_name="parcela_id",
+                hover_data=hover_data,
+                custom_data=["parcela_id"],
+                center={"lat": center_lat, "lon": center_lon},
+                zoom=zoom,
+                opacity=0.68,
+                height=650,
+                mapbox_style="carto-positron",
+            )
 
     apply_carto_basemap(fig)
     fig.update_layout(
@@ -558,7 +724,7 @@ def render_map(
     if highlight_selected and selected_id is not None:
         selected_features = [
             feature
-            for feature in data.get("features", [])
+            for feature in map_data.get("features", [])
             if int(feature.get("properties", {}).get("parcela_id")) == int(selected_id)
         ]
 
