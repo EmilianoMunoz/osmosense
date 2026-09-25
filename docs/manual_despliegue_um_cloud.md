@@ -456,6 +456,34 @@ Resultado:
 1
 ```
 
+Esta autenticación OAuth permitió validar el despliegue, pero no es adecuada
+para un proceso desatendido: el refresh token personal fue invalidado en más
+de una oportunidad y el timer comenzó a fallar antes de actualizar su estado.
+
+La configuración adoptada reemplaza ese archivo por ADC de gcloud, creada
+bajo el mismo usuario `osmosense` que ejecuta el timer:
+
+```bash
+sudo -u osmosense -H gcloud auth application-default login \
+  --no-launch-browser \
+  --scopes=https://www.googleapis.com/auth/earthengine,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive
+sudo -u osmosense -H gcloud auth application-default set-quota-project \
+  estres-hidrico-493912
+```
+
+La organización bloquea la creación de claves de cuenta de servicio mediante
+`iam.disableServiceAccountKeyCreation`. Por eso `/opt/osmosense/.env` usa:
+
+```dotenv
+GEE_AUTH_MODE=appdefault
+GOOGLE_APPLICATION_CREDENTIALS=/opt/osmosense/.config/gcloud/application_default_credentials.json
+```
+
+El pipeline obtiene las credenciales mediante `google.auth.default()`. Esta
+solución sigue vinculada a una cuenta personal, pero elimina el token notebook
+que falló repetidamente. Workload Identity Federation queda como mejora futura
+si UM-Cloud ofrece un proveedor OIDC/SAML o certificados administrados.
+
 ### 11. Pipeline Cloud
 
 Primer error:
@@ -660,5 +688,5 @@ activo solo es necesario para acceder al dashboard o a la VM.
 
 - Copiar backups a almacenamiento externo o volumen persistente adicional.
 - Evaluar HTTPS/proxy inverso si se quiere acceso fuera de ZeroTier.
-- Reemplazar autenticación manual Earth Engine por cuenta de servicio si el
-  proyecto pasa de demo/tesis a producción formal.
+- Migrar ADC personal de Earth Engine a Workload Identity Federation si
+  UM-Cloud incorpora un proveedor de identidad compatible.

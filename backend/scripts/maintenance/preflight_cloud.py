@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import stat
 import sys
@@ -144,6 +145,77 @@ def check_required_env(findings: list[Finding]) -> None:
         add(findings, "FAIL", "GEE_PROJECT_ID es obligatorio para pipeline Sentinel/GEE.")
     else:
         add(findings, "OK", "GEE_PROJECT_ID configurado.")
+
+    gee_auth_mode = env("GEE_AUTH_MODE", "persistent").lower()
+    if gee_auth_mode == "persistent":
+        add(
+            findings,
+            "WARN",
+            "GEE usa OAuth personal de Earth Engine; ADC de gcloud es más estable para el timer.",
+        )
+        return
+
+    if gee_auth_mode != "appdefault":
+        add(
+            findings,
+            "FAIL",
+            "GEE_AUTH_MODE debe ser 'persistent' o 'appdefault'.",
+        )
+        return
+
+    gee_credentials = env("GOOGLE_APPLICATION_CREDENTIALS")
+    if not gee_credentials:
+        add(
+            findings,
+            "OK",
+            "GEE usa Application Default Credentials del usuario systemd.",
+        )
+        return
+
+    credentials_path = Path(gee_credentials).expanduser()
+    if not credentials_path.is_absolute():
+        add(findings, "FAIL", "La configuración ADC debe usar una ruta absoluta.")
+    elif not credentials_path.is_file():
+        add(
+            findings,
+            "FAIL",
+            f"No existe la configuración ADC de GEE: {credentials_path}.",
+        )
+    else:
+        mode = stat.S_IMODE(credentials_path.stat().st_mode)
+        if mode & 0o077:
+            add(
+                findings,
+                "FAIL",
+                f"La configuración ADC tiene permisos {oct(mode)}; usar chmod 600.",
+            )
+        else:
+            try:
+                credential_type = json.loads(
+                    credentials_path.read_text()
+                ).get("type")
+            except (OSError, json.JSONDecodeError, AttributeError) as exc:
+                add(
+                    findings,
+                    "FAIL",
+                    f"La configuración ADC no es JSON válido: {exc}.",
+                )
+            else:
+                if credential_type == "authorized_user":
+                    add(findings, "OK", "ADC de gcloud configuradas para GEE.")
+                elif credential_type == "external_account":
+                    add(
+                        findings,
+                        "OK",
+                        "Workload Identity Federation configurada para GEE.",
+                    )
+                else:
+                    add(
+                        findings,
+                        "WARN",
+                        "ADC configurada con tipo "
+                        f"{credential_type or 'desconocido'}; validar acceso GEE.",
+                    )
 
 
 def check_deployment_files(findings: list[Finding]) -> None:

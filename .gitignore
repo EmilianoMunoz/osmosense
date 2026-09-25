@@ -7,6 +7,10 @@ __pycache__/
 dist/
 build/
 
+# Credenciales privadas de servicios externos
+.config/
+secrets/
+
 # Datos raster y tablas grandes/regenerables
 *.tif
 *.tiff

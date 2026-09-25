@@ -227,31 +227,70 @@ venv/bin/python backend/scripts/maintenance/run_preflight_cloud.py --check-db
 
 La VM debe poder inicializar Earth Engine con `GEE_PROJECT_ID`.
 
-Para una demo/tesis se puede autenticar manualmente desde la VM:
+### ADC de gcloud para el timer
+
+La organización de Google Cloud aplica `iam.disableServiceAccountKeyCreation`,
+por lo que no se deben descargar claves JSON de cuentas de servicio. Para esta
+VM se utilizan Application Default Credentials (ADC) de la cuenta autorizada.
+Es una credencial personal y puede revocarse, pero evita el flujo de notebook
+que falló repetidamente y es compatible con `google.auth.default()`.
+
+Instalar Google Cloud CLI en Ubuntu siguiendo el repositorio oficial:
 
 ```bash
-venv/bin/earthengine authenticate
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+  | sudo gpg --dearmor --yes -o /usr/share/keyrings/cloud.google.gpg
+echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+  | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+sudo apt-get update
+sudo apt-get install -y google-cloud-cli
 ```
 
-El pipeline `systemd` corre con el usuario `osmosense`, por lo que las
-credenciales deben quedar disponibles en su home (`/opt/osmosense`). Si se
-autenticó con el usuario SSH, copiar las credenciales antes de instalar
-`systemd`:
+Autenticar directamente al usuario que ejecuta systemd:
 
 ```bash
-mkdir -p /opt/osmosense/.config/earthengine
-cp ~/.config/earthengine/credentials /opt/osmosense/.config/earthengine/credentials
-sudo chown -R osmosense:osmosense /opt/osmosense/.config
+sudo -u osmosense -H gcloud auth application-default login \
+  --no-launch-browser \
+  --scopes=https://www.googleapis.com/auth/earthengine,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive
+sudo -u osmosense -H gcloud auth application-default set-quota-project \
+  estres-hidrico-493912
 ```
 
-Para producción formal, preferir una cuenta de servicio de GEE y credenciales
-no interactivas.
+El primer comando muestra una URL y un código. La autorización se completa en
+el navegador con la cuenta que ya tiene acceso a Earth Engine. La credencial
+queda en:
 
-Validar manualmente antes de programar el pipeline:
+```text
+/opt/osmosense/.config/gcloud/application_default_credentials.json
+```
+
+Agregar a `/opt/osmosense/.env`:
+
+```dotenv
+GEE_AUTH_MODE=appdefault
+GOOGLE_APPLICATION_CREDENTIALS=/opt/osmosense/.config/gcloud/application_default_credentials.json
+```
+
+Validar configuración y acceso real con el mismo usuario de systemd:
 
 ```bash
-venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud
+cd /opt/osmosense
+venv/bin/python backend/scripts/maintenance/run_preflight_cloud.py --check-db
+sudo -u osmosense -H bash -lc 'cd /opt/osmosense && venv/bin/python -c "import ee; from backend.app.core.gee import inicializar_gee; inicializar_gee(); print(ee.Number(1).getInfo())"'
 ```
+
+El resultado final debe ser `1`. Si Google revoca la sesión, se repite solamente
+`gcloud auth application-default login`; no se vuelve a usar
+`earthengine authenticate --auth_mode=notebook`.
+
+### Alternativa futura sin identidad personal
+
+Workload Identity Federation evita credenciales personales y claves privadas,
+pero requiere que UM-Cloud proporcione un emisor OIDC/SAML o certificados de
+identidad aceptables. Se deja como mejora futura porque depende del
+administrador de la infraestructura.
 
 Para una ejecucion real con Sentinel y carga en PostGIS:
 

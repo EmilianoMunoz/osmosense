@@ -60,7 +60,7 @@ Pendiente:
 - copiar backups a almacenamiento externo o volumen persistente adicional;
 - revisar logs de las primeras corridas automáticas;
 - evaluar HTTPS/proxy inverso si se requiere acceso fuera de ZeroTier;
-- migrar autenticación Earth Engine manual a cuenta de servicio si el proyecto
+- migrar ADC personal de Earth Engine a Workload Identity Federation si el proyecto
   pasa de demo/tesis a producción formal.
 
 Criterio de listo:
