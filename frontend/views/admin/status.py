@@ -41,6 +41,18 @@ def _format_date_value(value: object) -> str:
         return str(value)
 
 
+def _pipeline_run_age_days(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        text = str(value).replace("Z", "+00:00")
+        dt = datetime.fromisoformat(text)
+        now = datetime.now(dt.tzinfo)
+        return max(0.0, (now - dt).total_seconds() / 86400)
+    except ValueError:
+        return None
+
+
 def _format_percent(value: object, decimals: int = 1) -> str:
     if value is None or pd.isna(value):
         return "-"
@@ -114,6 +126,13 @@ def render_pipeline_status() -> None:
             st.info("Todavía no hay estado persistido del pipeline.")
         return
 
+    run_age_days = _pipeline_run_age_days(state.get("last_run_utc"))
+    if run_age_days is not None and run_age_days > 2:
+        st.error(
+            "No se registra una ejecución del pipeline en los últimos "
+            f"{int(run_age_days)} días. Revisar el timer y los logs de producción."
+        )
+
     coverage_status = coverage.get("status")
     coverage_rejected = coverage_status == "ultima_fecha_descartada_por_cobertura"
     skipped = bool(state.get("skipped", False))
@@ -122,6 +141,9 @@ def render_pipeline_status() -> None:
         status_label = "Error"
         status_message = "La última ejecución del pipeline terminó con error."
         st.error(status_message)
+        error_detail = state.get("error")
+        if error_detail:
+            st.caption(f"Detalle técnico: {error_detail}")
     elif coverage_rejected:
         status_label = "Sin actualización operativa"
         status_message = (

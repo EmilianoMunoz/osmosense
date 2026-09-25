@@ -169,8 +169,22 @@ def log(message: str, log_path: Path) -> None:
         fh.write(line + "\n")
 
 
+def command_for_log(command: list[str]) -> str:
+    safe_command: list[str] = []
+    redact_next = False
+    for part in command:
+        if redact_next:
+            safe_command.append("<redacted>")
+            redact_next = False
+            continue
+        safe_command.append(part)
+        if part == "--database-url":
+            redact_next = True
+    return " ".join(safe_command)
+
+
 def run_command(command: list[str], log_path: Path, dry_run: bool) -> None:
-    log("CMD " + " ".join(command), log_path)
+    log("CMD " + command_for_log(command), log_path)
     if dry_run:
         return
 
@@ -182,7 +196,10 @@ def run_command(command: list[str], log_path: Path, dry_run: bool) -> None:
         for line in result.stderr.rstrip().splitlines():
             log("ERR " + line, log_path)
     if result.returncode != 0:
-        raise RuntimeError(f"Comando fallo con exit code {result.returncode}: {' '.join(command)}")
+        raise RuntimeError(
+            f"Comando fallo con exit code {result.returncode}: "
+            f"{command_for_log(command)}"
+        )
 
 
 def recent_window_bounds(
@@ -695,11 +712,7 @@ def cargar_zonificacion_postgis(args: argparse.Namespace, state: dict, log_path:
     run_command(command, log_path, args.dry_run)
 
 
-def main() -> None:
-    args = parse_args()
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = Path(args.logs_dir) / f"pipeline_hidrico_{run_id}.log"
-
+def ejecutar_pipeline(args: argparse.Namespace, log_path: Path) -> None:
     log(f"Inicio pipeline hidrico mode={args.mode}", log_path)
     log(f"Dry run: {args.dry_run}", log_path)
     quality_enabled = args.run_quality_audits or args.backfill_outlier_history
@@ -785,6 +798,33 @@ def main() -> None:
 
     log("Pipeline finalizado correctamente", log_path)
     print(json.dumps(state, indent=2), flush=True)
+
+
+def main() -> None:
+    args = parse_args()
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = Path(args.logs_dir) / f"pipeline_hidrico_{run_id}.log"
+
+    try:
+        ejecutar_pipeline(args, log_path)
+    except Exception as exc:
+        state = {
+            "mode": args.mode,
+            "last_run_utc": utc_now(),
+            "input_temporal": args.input,
+            "log_path": str(log_path),
+            "update_sentinel": args.update_sentinel,
+            "load_postgis": args.load_postgis,
+            "skipped": False,
+            "failed": True,
+            "reason": "error",
+            "error_type": type(exc).__name__,
+            "error": "La ejecución falló; consultar el log restringido del pipeline.",
+        }
+        if not args.dry_run:
+            guardar_estado(Path(args.state_dir), state)
+        log(f"Pipeline finalizado con error de tipo {type(exc).__name__}", log_path)
+        raise
 
 
 if __name__ == "__main__":

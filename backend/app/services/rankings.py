@@ -321,6 +321,16 @@ def _merge_quality_audits(df: pd.DataFrame) -> pd.DataFrame:
     if not historicas.empty:
         merged = merged.merge(historicas, on="parcela_id", how="left")
 
+    expected_columns = (
+        AUDIT_VECINOS_COLUMNS
+        + AUDIT_TEMPORAL_COLUMNS
+        + AUDIT_RUIDO_COLUMNS
+        + AUDIT_HISTORICAL_METRICS_COLUMNS
+    )
+    for column in expected_columns:
+        if column != "parcela_id" and column not in merged.columns:
+            merged[column] = None
+
     if "outlier_espacial" not in merged.columns:
         merged["outlier_espacial"] = False
     else:

@@ -18,9 +18,20 @@ def render_review_cases(df: pd.DataFrame) -> None:
         return
 
     review["orden_revision"] = review.apply(review_priority, axis=1)
+    sort_candidates = [
+        ("orden_revision", True),
+        ("severidad_ruido", False),
+        ("ranking_global", True),
+    ]
+    sort_columns = [column for column, _ in sort_candidates if column in review.columns]
+    sort_ascending = [
+        ascending
+        for column, ascending in sort_candidates
+        if column in review.columns
+    ]
     review = review.sort_values(
-        ["orden_revision", "severidad_ruido", "ranking_global"],
-        ascending=[True, False, True],
+        sort_columns,
+        ascending=sort_ascending,
         na_position="last",
     )
 
