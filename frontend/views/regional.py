@@ -7,6 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from frontend.basemap import apply_carto_basemap
 from frontend.components.branding import render_fullscreen_loader
 from frontend.config import local_fallback_enabled
 from frontend.constants import PRIORIDAD_COLOR, PRIORIDAD_ORDEN_MAPA
@@ -163,6 +164,7 @@ def render_regional_map(
         mapbox_style="carto-positron",
         **color_kwargs,
     )
+    apply_carto_basemap(fig)
     fig.update_layout(
         margin={"r": 0, "t": 0, "l": 0, "b": 0},
         legend_title_text=legend_title,

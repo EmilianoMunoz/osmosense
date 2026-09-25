@@ -8,6 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from frontend.basemap import apply_carto_basemap
 from frontend.constants import (
     ACCION_COLOR,
     CONFIANZA_COLOR,
@@ -545,6 +546,7 @@ def render_map(
             mapbox_style="carto-positron",
         )
 
+    apply_carto_basemap(fig)
     fig.update_layout(
         margin={"r": 0, "t": 0, "l": 0, "b": 0},
         legend_title_text=legend_title,

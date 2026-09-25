@@ -9,7 +9,6 @@ load_dotenv()
 GEE_SCOPES = (
     "https://www.googleapis.com/auth/earthengine",
     "https://www.googleapis.com/auth/cloud-platform",
-    "https://www.googleapis.com/auth/drive",
 )
 
 

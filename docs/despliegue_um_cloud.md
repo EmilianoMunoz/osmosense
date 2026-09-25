@@ -253,7 +253,7 @@ Autenticar directamente al usuario que ejecuta systemd:
 ```bash
 sudo -u osmosense -H gcloud auth application-default login \
   --no-launch-browser \
-  --scopes=https://www.googleapis.com/auth/earthengine,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/drive
+  --scopes=https://www.googleapis.com/auth/earthengine,https://www.googleapis.com/auth/cloud-platform
 sudo -u osmosense -H gcloud auth application-default set-quota-project \
   estres-hidrico-493912
 ```
