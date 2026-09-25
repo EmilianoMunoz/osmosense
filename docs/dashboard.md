@@ -104,7 +104,7 @@ Responsabilidades:
 | `frontend/components/tables.py`          | Tablas y resúmenes tabulares.                     |
 | `frontend/components/charts.py`          | Gráficos de proyección y distribución.            |
 | `frontend/panels.py`                     | Fachada de compatibilidad para componentes.       |
-| `frontend/views/dashboard_filters.py`    | Filtros, navegación y selección de vista.         |
+| `frontend/views/dashboard_filters.py`    | Enrutamiento por rol y filtros laterales.          |
 | `frontend/views/dashboard.py`            | Orquestación de la vista Streamlit.               |
 | `frontend/views/admin/`                  | Gestión admin de usuarios, productores y parcelas.|
 | `frontend/views/regional.py`             | Vista regional por UM DGI recortada a San Rafael. |
@@ -174,9 +174,14 @@ viejas.
 - en `Usuarios`, alta, edición, reactivación y desactivación trazable de
   accesos. Los productores requieren apellido y DNI válido;
 - en `Parcelas`, subsecciones `Asignar y desasignar` y `Agregar al análisis`;
-- mapa operativo filtrado por defecto a prioridades `alta` y `crítica`;
-- opción `Mostrar todas las prioridades` para cargar el universo completo;
-- filtros por cultivo, prioridad, confianza y rango de ranking;
+- la vista se deriva del rol autenticado y no puede cambiarse desde el sidebar;
+- mapa operativo filtrado por defecto con `Foco operativo` (`alta` y `crítica`);
+- alcance alternativo para todas las prioridades o una selección personalizada;
+- formulario único para aplicar cultivo, confianza, prioridad y ranking sin
+  rerenderizar el mapa en cada cambio;
+- filtros avanzados para percentiles y ranking por presets o rango personalizado;
+- modo explícito de `Revisión técnica`, contador de parcelas visibles y acción
+  para restablecer filtros;
 - pestaña de estado general con métricas del universo completo y de la vista
   activa;
 - panel de proyección actual, 5 días y 10 días;

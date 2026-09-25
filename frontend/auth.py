@@ -311,13 +311,24 @@ def render_auth_sidebar() -> None:
     label = st.session_state.get("auth_label", "Usuario")
     source = st.session_state.get("auth_source")
     role = st.session_state.get("auth_rol")
+    role_label = {
+        "admin": "Administrador",
+        "regional": "Autoridad regional",
+        "productor": "Productor",
+    }.get(role, label)
+
     render_sidebar_logo()
-    st.sidebar.header("Sesión")
+    st.sidebar.markdown(f"**{role_label}**")
+    if label and str(label).strip().lower() != role_label.lower():
+        st.sidebar.caption(str(label))
     if source and source != "postgis":
-        st.sidebar.info("Sesión local")
-    st.sidebar.caption(f"Usuario: {label}")
-    if role:
-        st.sidebar.caption(f"Rol: {role}")
-    if st.sidebar.button("Cerrar sesión", width="stretch"):
+        st.sidebar.warning("Sesión fuera de PostGIS")
+    if st.sidebar.button(
+        "Cerrar sesión",
+        type="tertiary",
+        icon=":material/logout:",
+        width="stretch",
+    ):
         logout()
         st.rerun()
+    st.sidebar.divider()

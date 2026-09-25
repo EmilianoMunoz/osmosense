@@ -159,7 +159,7 @@ El payload incluye:
 | `dni` | DNI, si fue cargado |
 | `rol` | `admin`, `regional` o `productor` |
 | `cliente_id` | Cartera de parcelas del productor, si aplica |
-| `view_mode` | Vista inicial sugerida |
+| `view_mode` | Compatibilidad del payload; el frontend deriva la vista desde `rol` |
 | `iat` | Fecha/hora de emisión |
 | `exp` | Fecha/hora de expiración |
 
@@ -322,7 +322,7 @@ Campos principales:
 | `auth_cliente_id` | Productor asociado, si aplica. |
 | `auth_source` | Fuente de autenticación, normalmente `postgis`. |
 | `auth_token` | Token bearer para llamadas a API. |
-| `view_mode` | Vista activa: Admin, Regional o Productor. |
+| `view_mode` | Vista derivada de `auth_rol`; no es seleccionable por el usuario. |
 
 Archivo:
 
@@ -335,7 +335,7 @@ frontend/auth.py
 La vista disponible se decide en:
 
 ```text
-frontend/views/dashboard.py
+frontend/views/dashboard_filters.py
 ```
 
 Función:
@@ -346,9 +346,10 @@ select_view_mode()
 
 Reglas:
 
-- `admin`: puede elegir `Admin`, `Regional` o `Productor`;
-- `regional`: solo ve `Regional`;
-- `productor`: solo ve `Productor`;
+- `admin`: se dirige únicamente a `Admin`;
+- `regional`: se dirige únicamente a `Regional`;
+- `productor`: se dirige únicamente a `Productor`;
+- el sidebar no permite cambiar de rol ni de vista;
 - sesión no autenticada: pantalla de login.
 
 ## Accesos Rápidos PostGIS

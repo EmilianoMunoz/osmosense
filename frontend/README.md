@@ -23,7 +23,7 @@ La vista principal se organiza así:
 ```text
 frontend/views/
 ├── dashboard.py          # orquestador de dashboard y análisis
-├── dashboard_filters.py  # selección de rol/vista y filtros laterales
+├── dashboard_filters.py  # enrutamiento por rol y filtros laterales
 ├── regional.py           # vista regional por UM
 └── admin/
     ├── __init__.py           # pestañas de gestión admin

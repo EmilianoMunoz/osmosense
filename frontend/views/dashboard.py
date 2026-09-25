@@ -27,11 +27,11 @@ from frontend.components.tables import (
 )
 from frontend.views.admin import render_admin_management_area
 from frontend.views.admin.status import (
-    _human_source,
     render_admin_status_tab,
     render_runtime_notices,
 )
 from frontend.views.dashboard_filters import (
+    apply_admin_sidebar_filters,
     apply_sidebar_filters,
     select_cliente,
     select_priority_mode,
@@ -340,25 +340,24 @@ def render_dashboard() -> None:
         st.error("No se pudo cargar el ranking.")
         return
 
-    st.sidebar.header("Vista")
-    st.sidebar.caption(f"Fuente: {_human_source(data.get('source'))}")
     render_runtime_notices(data)
 
-    priority_mode = select_priority_mode(admin_mode)
+    if admin_mode:
+        df, filtered, color_by, priority_mode = apply_admin_sidebar_filters(df)
+    else:
+        priority_mode = select_priority_mode(admin_mode)
+        df = add_dynamic_priority(df, priority_mode)
+        filtered, color_by = apply_sidebar_filters(
+            df=df,
+            admin_mode=admin_mode,
+            priority_mode=priority_mode,
+        )
 
     producer_context = "me" if producer_self_mode else selected_cliente_id
     priority_context = f"{view_mode}:{producer_context}:{priority_mode}"
     if st.session_state.get("prev_priority_context") != priority_context:
         st.session_state.pop("selected_parcela_id", None)
     st.session_state["prev_priority_context"] = priority_context
-
-    df = add_dynamic_priority(df, priority_mode)
-
-    filtered, color_by = apply_sidebar_filters(
-        df=df,
-        admin_mode=admin_mode,
-        priority_mode=priority_mode,
-    )
 
     filtered_data = sync_geojson_properties_from_df(data, filtered)
     if admin_mode:
