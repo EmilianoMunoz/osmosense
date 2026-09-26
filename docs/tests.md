@@ -202,6 +202,25 @@ Ejecutar cuando se modifica:
 venv/bin/python -m pytest tests/test_rankings_service.py -q
 ```
 
+### `tests/test_pipeline_resilience.py`
+
+Valida publicación segura, tolerancia a auditorías opcionales y contratos de
+rendimiento del pipeline y dashboard.
+
+Cubre:
+
+- estado de error sin exponer secretos;
+- escritura y promoción atómica del ranking latest;
+- rechazo de rankings con parcelas duplicadas;
+- preparación de zonificación UM antes de publicar el ranking PostGIS;
+- contrato compacto sin geometrías para secciones administrativas livianas;
+- carga completa reservada para mapa o revisión técnica;
+- reutilización de GeoJSON cuando no cambió la versión de datos.
+
+```bash
+venv/bin/python -m pytest tests/test_pipeline_resilience.py -q
+```
+
 ### `tests/test_predictor_validation_report.py`
 
 Valida el reporte reproducible de validacion historica del predictor hidrico.

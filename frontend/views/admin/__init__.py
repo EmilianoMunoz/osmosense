@@ -7,20 +7,29 @@ from frontend.views.admin.fields import render_parcelas_tab
 from frontend.views.admin.users import render_users_tab
 
 
+MANAGEMENT_SECTIONS = ["Usuarios", "Asignaciones", "Incorporar al análisis"]
+
+
 def render_admin_management_area() -> None:
     st.subheader("Gestión")
-    st.caption("Mantenimiento operativo separado por usuarios y parcelas.")
+    st.caption("Usuarios, relaciones productor-parcela e incorporación al análisis.")
 
-    tab_usuarios, tab_parcelas = st.tabs(["Usuarios", "Parcelas"])
+    active_section = st.segmented_control(
+        "Sección de gestión",
+        MANAGEMENT_SECTIONS,
+        default="Usuarios",
+        label_visibility="collapsed",
+        key="admin_management_section",
+        width="stretch",
+    )
+    active_section = active_section or "Usuarios"
 
-    with tab_usuarios:
+    if active_section == "Usuarios":
         render_users_tab()
+        return
 
-    with tab_parcelas:
-        tab_asignacion, tab_nuevas = st.tabs(
-            ["Asignar y desasignar", "Agregar al análisis"]
-        )
-        with tab_asignacion:
-            render_parcelas_tab()
-        with tab_nuevas:
-            render_available_parcels_tab()
+    if active_section == "Asignaciones":
+        render_parcelas_tab()
+        return
+
+    render_available_parcels_tab()

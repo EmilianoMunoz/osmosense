@@ -6,6 +6,7 @@ import secrets
 import string
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -24,6 +25,12 @@ DEFAULT_USERS = [
     "regional@osmosense.local",
 ]
 ALPHABET = string.ascii_letters + string.digits + "-_"
+QUICK_LOGIN_PASSWORD_ENV = {
+    "admin@osmosense.local": "QUICK_LOGIN_ADMIN_PASSWORD",
+    "productor.vid@osmosense.local": "QUICK_LOGIN_PRODUCTOR_VID_PASSWORD",
+    "productor.olivo@osmosense.local": "QUICK_LOGIN_PRODUCTOR_OLIVO_PASSWORD",
+    "regional@osmosense.local": "QUICK_LOGIN_REGIONAL_PASSWORD",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,6 +50,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         metavar="EMAIL=PASSWORD",
         help="Define contraseña explícita para un usuario. Puede repetirse.",
+    )
+    parser.add_argument(
+        "--from-env",
+        action="store_true",
+        help="Lee las contraseñas de QUICK_LOGIN_*_PASSWORD.",
     )
     parser.add_argument("--password-length", type=int, default=20)
     parser.add_argument(
@@ -76,6 +88,23 @@ def parse_explicit_passwords(values: list[str] | None) -> dict[str, str]:
             raise ValueError(f"La contraseña de {email} debe tener al menos 8 caracteres.")
         parsed[email] = password
     return parsed
+
+
+def passwords_from_env() -> dict[str, str]:
+    load_dotenv()
+    passwords: dict[str, str] = {}
+    missing: list[str] = []
+    for email, variable in QUICK_LOGIN_PASSWORD_ENV.items():
+        password = os.getenv(variable, "")
+        if len(password) < 8:
+            missing.append(variable)
+        else:
+            passwords[email] = password
+    if missing:
+        raise ValueError(
+            "Faltan contraseñas válidas en: " + ", ".join(sorted(missing))
+        )
+    return passwords
 
 
 def generate_password(length: int) -> str:
@@ -138,6 +167,8 @@ def print_plan(passwords: dict[str, str], show_passwords: bool) -> None:
 def main() -> int:
     args = parse_args()
     explicit = parse_explicit_passwords(args.set)
+    if args.from_env:
+        explicit = {**passwords_from_env(), **explicit}
     users = target_users(args, explicit)
     if args.confirm and args.hide_passwords and has_generated_passwords(users, explicit):
         print(
@@ -151,7 +182,14 @@ def main() -> int:
     db_url = database_url(args.database_url)
 
     print("=== Rotación credenciales cloud OSMOSENSE ===")
-    print("Database URL:", db_url)
+    parsed_db = urlsplit(db_url)
+    db_host = parsed_db.hostname or "-"
+    db_port = f":{parsed_db.port}" if parsed_db.port else ""
+    print(
+        "Database URL:",
+        f"{parsed_db.scheme}://{parsed_db.username or '-'}:***@"
+        f"{db_host}{db_port}{parsed_db.path}",
+    )
     print("Usuarios objetivo:", len(users))
 
     if not args.confirm:

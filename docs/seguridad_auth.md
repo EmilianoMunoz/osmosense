@@ -432,8 +432,10 @@ venv/bin/python -m pytest tests/test_auth.py tests/test_api_handlers.py -q
 - El token no es JWT estándar.
 - No hay refresh token.
 - No hay revocación de token en servidor.
-- Los accesos rápidos dependen de usuarios reales en PostGIS y quedan
-  deshabilitados cuando `APP_ENV=production`.
+- Los accesos rápidos dependen de usuarios reales en PostGIS. En producción
+  quedan deshabilitados por defecto; la demo de tesis puede habilitarlos solo con
+  `ENABLE_QUICK_LOGIN=true` y `ALLOW_PRODUCTION_QUICK_LOGIN=true`. Sus
+  contraseñas se leen del `.env` y no se versionan.
 - `AUTH_SECRET` debe configurarse explícitamente en producción, con al menos 32
   caracteres y sin usar valores de ejemplo.
 - El fallback local es útil para desarrollo; en producción queda deshabilitado
@@ -450,7 +452,9 @@ Antes de producción conviene:
    `backend/scripts/maintenance/rotar_credenciales_cloud.py --confirm`.
 4. Ejecutar `backend/scripts/maintenance/run_preflight_cloud.py --check-db` antes
    de la demo cloud.
-5. Mantener `ENABLE_QUICK_LOGIN=false` en producción.
+5. Mantener `ENABLE_QUICK_LOGIN=false` en producción real. La excepción para
+   una demo controlada requiere también `ALLOW_PRODUCTION_QUICK_LOGIN=true` y
+   las cuatro variables `QUICK_LOGIN_*_PASSWORD` fuera del repositorio.
 6. Exigir HTTPS en el entorno cloud si se expone fuera de ZeroTier.
 7. Agregar política de rotación de contraseñas si el alcance del producto lo requiere.
 8. Registrar intentos de login fallidos.

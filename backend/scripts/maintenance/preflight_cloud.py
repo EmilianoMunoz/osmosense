@@ -27,6 +27,12 @@ DEFAULT_DEMO_CREDENTIALS = {
     "productor.olivo@osmosense.local": "cliente123",
     "regional@osmosense.local": "regional123",
 }
+QUICK_LOGIN_PASSWORD_VARS = (
+    "QUICK_LOGIN_ADMIN_PASSWORD",
+    "QUICK_LOGIN_PRODUCTOR_VID_PASSWORD",
+    "QUICK_LOGIN_PRODUCTOR_OLIVO_PASSWORD",
+    "QUICK_LOGIN_REGIONAL_PASSWORD",
+)
 CONFIG: dict[str, str] = {}
 
 
@@ -103,16 +109,43 @@ def check_required_env(findings: list[Finding]) -> None:
         add(findings, "FAIL", "APP_ENV debe ser production para la demo cloud.")
     else:
         add(findings, "OK", "APP_ENV=production.")
-
     if not is_false(env("ENABLE_LOCAL_FALLBACK", "true")):
         add(findings, "FAIL", "ENABLE_LOCAL_FALLBACK debe ser false en cloud.")
     else:
         add(findings, "OK", "Fallback local deshabilitado.")
 
-    if not is_false(env("ENABLE_QUICK_LOGIN", "true")):
-        add(findings, "FAIL", "ENABLE_QUICK_LOGIN debe ser false en cloud.")
-    else:
+    quick_login = not is_false(env("ENABLE_QUICK_LOGIN", "false"))
+    quick_login_allowed = not is_false(
+        env("ALLOW_PRODUCTION_QUICK_LOGIN", "false")
+    )
+    if not quick_login:
         add(findings, "OK", "Login rápido deshabilitado.")
+    elif not quick_login_allowed:
+        add(
+            findings,
+            "FAIL",
+            "Login rápido en producción requiere "
+            "ALLOW_PRODUCTION_QUICK_LOGIN=true.",
+        )
+    else:
+        missing_passwords = [
+            variable
+            for variable in QUICK_LOGIN_PASSWORD_VARS
+            if len(env(variable)) < 8
+        ]
+        if missing_passwords:
+            add(
+                findings,
+                "FAIL",
+                "Faltan credenciales de acceso rápido: "
+                + ", ".join(missing_passwords),
+            )
+        else:
+            add(
+                findings,
+                "WARN",
+                "Login rápido habilitado explícitamente para la demo cloud.",
+            )
 
     database_url = env("DATABASE_URL")
     if not database_url:

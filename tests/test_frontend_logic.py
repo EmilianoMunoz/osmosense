@@ -13,6 +13,7 @@ from frontend.logic import (
 )
 from frontend import data as frontend_data
 from frontend import config as frontend_config
+from frontend import auth as frontend_auth
 from frontend.data import filtered_geojson
 from frontend.map import (
     _ui_revision,
@@ -58,6 +59,35 @@ class FrontendLogicTest(unittest.TestCase):
         ):
             self.assertFalse(frontend_config.local_fallback_enabled())
             self.assertFalse(frontend_config.quick_login_enabled())
+
+    def test_production_can_explicitly_enable_quick_login_for_demo(self):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "APP_ENV": "production",
+                    "ENABLE_QUICK_LOGIN": "true",
+                    "ALLOW_PRODUCTION_QUICK_LOGIN": "true",
+                },
+                clear=True,
+            ),
+            patch.object(frontend_config, "load_dotenv", return_value=False),
+        ):
+            self.assertTrue(frontend_config.quick_login_enabled())
+
+    def test_quick_login_users_read_passwords_from_environment(self):
+        with (
+            patch.dict(
+                os.environ,
+                {"QUICK_LOGIN_ADMIN_PASSWORD": "cloud-password"},
+                clear=True,
+            ),
+            patch.object(frontend_auth, "load_dotenv", return_value=False),
+        ):
+            users = frontend_auth.quick_login_users()
+
+        self.assertEqual(users["admin"].password, "cloud-password")
+        self.assertEqual(users["regional"].password, "regional123")
 
     def test_load_geojson_returns_api_unavailable_when_fallback_is_disabled(self):
         with (

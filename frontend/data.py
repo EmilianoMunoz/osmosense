@@ -133,6 +133,23 @@ def fetch_geojson_from_api(
 
 
 @st.cache_data(show_spinner=False)
+def fetch_latest_ranking_from_api(
+    base_url: str,
+    token: str | None,
+) -> dict[str, Any] | None:
+    try:
+        response = requests.get(
+            f"{base_url}/rankings/latest",
+            headers=auth_headers(token),
+            timeout=20,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException:
+        return None
+
+
+@st.cache_data(show_spinner=False)
 def fetch_pipeline_state_from_api(base_url: str, token: str | None) -> dict[str, Any] | None:
     try:
         response = requests.get(
@@ -664,6 +681,34 @@ def load_my_parcelas() -> dict[str, Any]:
             )
         return _api_unavailable_payload()
     return data
+
+
+def ranking_items_to_feature_collection(data: dict[str, Any]) -> dict[str, Any]:
+    items = data.get("items", [])
+    return {
+        "type": "FeatureCollection",
+        "source": data.get("source", "api"),
+        "count": data.get("count", len(items)),
+        "total_count": data.get("count", len(items)),
+        "ranked_count": len(items),
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": None,
+                "properties": item,
+            }
+            for item in items
+        ],
+    }
+
+
+def load_ranking_overview() -> dict[str, Any]:
+    data = fetch_latest_ranking_from_api(api_base_url(), auth_token())
+    if data is not None:
+        return ranking_items_to_feature_collection(data)
+    if not local_fallback_enabled():
+        return _api_unavailable_geojson()
+    return load_geojson_local()
 
 
 def load_geojson(

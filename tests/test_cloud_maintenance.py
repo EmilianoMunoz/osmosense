@@ -65,6 +65,22 @@ class CloudCredentialRotationTest(unittest.TestCase):
             )
         )
 
+    def test_reads_quick_login_passwords_from_environment(self):
+        environment = {
+            variable: f"secure-{index}-password"
+            for index, variable in enumerate(
+                rotate.QUICK_LOGIN_PASSWORD_ENV.values(),
+                start=1,
+            )
+        }
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(rotate, "load_dotenv", return_value=False),
+        ):
+            passwords = rotate.passwords_from_env()
+
+        self.assertEqual(set(passwords), set(rotate.DEFAULT_USERS))
+
 
 class CloudPreflightGeeTest(unittest.TestCase):
     def base_config(self) -> dict[str, str]:
@@ -77,6 +93,34 @@ class CloudPreflightGeeTest(unittest.TestCase):
             "AUTH_SECRET": "a" * 40,
             "GEE_PROJECT_ID": "test-project",
         }
+
+    def test_accepts_explicit_quick_login_for_cloud_demo(self):
+        config = {
+            **self.base_config(),
+            "ENABLE_QUICK_LOGIN": "true",
+            "ALLOW_PRODUCTION_QUICK_LOGIN": "true",
+            **{
+                variable: "secure-demo-password"
+                for variable in preflight.QUICK_LOGIN_PASSWORD_VARS
+            },
+        }
+        findings = []
+
+        with patch.object(preflight, "CONFIG", config):
+            preflight.check_required_env(findings)
+
+        self.assertTrue(
+            any(
+                item.level == "WARN" and "demo cloud" in item.message
+                for item in findings
+            )
+        )
+        self.assertFalse(
+            any(
+                item.level == "FAIL" and "Login rápido" in item.message
+                for item in findings
+            )
+        )
 
     def test_warns_when_cloud_still_uses_personal_oauth(self):
         findings = []

@@ -11,6 +11,7 @@ from frontend.data import (
     filtered_geojson,
     load_geojson,
     load_my_geojson,
+    load_ranking_overview,
 )
 from frontend.logic import add_dynamic_priority
 from frontend.map import bbox_center_zoom, render_map
@@ -52,6 +53,15 @@ LEGACY_ADMIN_SECTIONS = {
     "Cobertura": "Calidad",
     "Revisión técnica": "Revisión",
 }
+
+
+def normalize_admin_analysis_section(value: object) -> str:
+    section = LEGACY_ADMIN_SECTIONS.get(str(value), str(value or "Estado"))
+    return section if section in ADMIN_ANALYSIS_SECTIONS else "Estado"
+
+
+def admin_requires_detailed_data(section: str, review_mode: object) -> bool:
+    return section in {"Mapa", "Revisión"} or review_mode == "Revisión técnica"
 
 
 def _format_dashboard_date(value: object) -> str:
@@ -319,11 +329,11 @@ def render_admin_analysis_area(
     selected_cliente_id: int | None,
     priority_mode: str,
 ) -> None:
-    current_section = st.session_state.get("admin_analysis_section")
-    if current_section in LEGACY_ADMIN_SECTIONS:
-        st.session_state["admin_analysis_section"] = LEGACY_ADMIN_SECTIONS[
-            current_section
-        ]
+    current_section = normalize_admin_analysis_section(
+        st.session_state.get("admin_analysis_section")
+    )
+    if st.session_state.get("admin_analysis_section") != current_section:
+        st.session_state["admin_analysis_section"] = current_section
 
     ranking_date = "-"
     if "fecha_ranking" in df.columns and df["fecha_ranking"].notna().any():
@@ -395,8 +405,8 @@ def render_dashboard() -> None:
 
     admin_area = "Análisis"
     if admin_mode:
-        header_title, header_mode, header_refresh = st.columns(
-            [0.56, 0.30, 0.14],
+        header_title, header_refresh = st.columns(
+            [0.82, 0.18],
             vertical_alignment="bottom",
         )
         with header_title:
@@ -404,25 +414,25 @@ def render_dashboard() -> None:
             st.caption(
                 "Ranking hídrico, calidad de datos y gestión operativa · San Rafael"
             )
-        with header_mode:
-            admin_area = st.segmented_control(
-                "Área",
-                ["Análisis", "Gestión"],
-                default="Análisis",
-                label_visibility="collapsed",
-                key="admin_area",
-                width="stretch",
-            )
-            admin_area = admin_area or "Análisis"
         with header_refresh:
             if st.button(
-                "Recargar",
+                "Recargar datos",
                 icon=":material/refresh:",
                 type="tertiary",
                 help="Volver a consultar los datos sin ejecutar el pipeline",
                 width="stretch",
             ):
                 refresh_dashboard_data()
+
+        admin_area = st.segmented_control(
+            "Área del panel",
+            ["Análisis", "Gestión"],
+            default="Análisis",
+            label_visibility="collapsed",
+            key="admin_area",
+            width="stretch",
+        )
+        admin_area = admin_area or "Análisis"
     else:
         st.title("Mis parcelas")
         st.caption("Lectura de atención hídrica y evolución esperada · San Rafael")
@@ -431,6 +441,13 @@ def render_dashboard() -> None:
         render_admin_management_area()
         return
 
+    admin_section = normalize_admin_analysis_section(
+        st.session_state.get("admin_analysis_section")
+    )
+    needs_detailed_admin_data = admin_mode and admin_requires_detailed_data(
+        admin_section,
+        st.session_state.get("admin_review_mode"),
+    )
     producer_self_mode = st.session_state.get("auth_rol") == "productor" and not admin_mode
     selected_cliente_id, _ = select_cliente(admin_mode)
     simplify_meters = 2.0 if admin_mode and selected_cliente_id is None else None
@@ -444,6 +461,8 @@ def render_dashboard() -> None:
     with st.spinner(loading_message):
         if producer_self_mode:
             data = load_my_geojson()
+        elif admin_mode and not needs_detailed_admin_data:
+            data = load_ranking_overview()
         else:
             data = load_geojson(selected_cliente_id, simplify_meters=simplify_meters)
         df = features_to_frame(data)
@@ -472,7 +491,11 @@ def render_dashboard() -> None:
         st.session_state.pop("selected_parcela_id", None)
     st.session_state["prev_priority_context"] = priority_context
 
-    filtered_data = sync_geojson_properties_from_df(data, filtered)
+    filtered_data = (
+        sync_geojson_properties_from_df(data, filtered)
+        if not admin_mode or needs_detailed_admin_data
+        else {"type": "FeatureCollection", "features": []}
+    )
     if admin_mode:
         render_admin_analysis_area(
             data=data,

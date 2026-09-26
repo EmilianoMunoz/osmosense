@@ -345,28 +345,26 @@ def render_usuario_card(user: pd.Series) -> None:
                         st.rerun()
 
 
-def render_users_tab() -> None:
-    st.subheader("Usuarios")
-    st.caption("Alta y mantenimiento de accesos. Roles operativos: admin, regional y productor.")
-
-    data, users = _usuarios_frame()
-
-    st.caption(f"Fuente: {data.get('source', 'desconocida')} · {len(users)} usuarios")
-    _render_users_summary(users)
-
+@st.dialog("Crear usuario", width="large")
+def render_create_usuario_dialog() -> None:
     productor_options, productor_labels = _productor_options()
 
-    with st.expander("Crear nuevo usuario", expanded=users.empty):
-        with st.form("create_usuario_form"):
-            col_a, col_b = st.columns(2)
-            with col_a:
-                email = st.text_input("Email", key="new_user_email")
-                nombre = st.text_input("Nombre", key="new_user_nombre")
-                apellido = st.text_input("Apellido", key="new_user_apellido")
-                dni = st.text_input("DNI", key="new_user_dni")
-            with col_b:
-                rol = st.selectbox("Rol", ["productor", "regional", "admin"], key="new_user_rol")
-                activo = st.checkbox("Activo", value=True, key="new_user_activo")
+    with st.form("create_usuario_form"):
+        identity_col, access_col = st.columns(2)
+        with identity_col:
+            st.markdown("**Identidad**")
+            email = st.text_input("Email", key="new_user_email")
+            nombre = st.text_input("Nombre", key="new_user_nombre")
+            apellido = st.text_input("Apellido", key="new_user_apellido")
+            dni = st.text_input("DNI", key="new_user_dni")
+        with access_col:
+            st.markdown("**Acceso**")
+            rol = st.selectbox(
+                "Rol",
+                ["productor", "regional", "admin"],
+                key="new_user_rol",
+            )
+            activo = st.checkbox("Activo", value=True, key="new_user_activo")
 
             cliente_id = None
             if rol == "productor":
@@ -377,51 +375,77 @@ def render_users_tab() -> None:
                     key="new_user_cliente_id",
                 )
 
-            password_cols = st.columns(2)
-            with password_cols[0]:
-                password = st.text_input(
-                    "Contraseña inicial",
-                    type="password",
-                    key="new_user_password",
-                )
-            with password_cols[1]:
-                password_confirm = st.text_input(
-                    "Confirmar contraseña",
-                    type="password",
-                    key="new_user_password_confirm",
-                )
-            submitted = st.form_submit_button("Crear usuario")
+        password_cols = st.columns(2)
+        with password_cols[0]:
+            password = st.text_input(
+                "Contraseña inicial",
+                type="password",
+                key="new_user_password",
+            )
+        with password_cols[1]:
+            password_confirm = st.text_input(
+                "Confirmar contraseña",
+                type="password",
+                key="new_user_password_confirm",
+            )
 
-        if submitted:
-            try:
-                if len(password) < 6:
-                    raise ValueError("La contraseña inicial debe tener al menos 6 caracteres.")
-                payload = _build_usuario_payload(
-                    email,
-                    nombre,
-                    apellido,
-                    dni,
-                    rol,
-                    cliente_id,
-                    activo,
-                    password,
-                    password_confirm,
-                )
-                create_usuario(payload)
-            except Exception as exc:
-                st.error(f"No se pudo crear el usuario: {api_error_message(exc)}")
-            else:
-                st.success("Usuario creado.")
-                st.rerun()
+        submitted = st.form_submit_button(
+            "Crear usuario",
+            type="primary",
+            width="stretch",
+        )
+
+    if not submitted:
+        return
+
+    try:
+        if len(password) < 6:
+            raise ValueError("La contraseña inicial debe tener al menos 6 caracteres.")
+        payload = _build_usuario_payload(
+            email,
+            nombre,
+            apellido,
+            dni,
+            rol,
+            cliente_id,
+            activo,
+            password,
+            password_confirm,
+        )
+        create_usuario(payload)
+    except Exception as exc:
+        st.error(f"No se pudo crear el usuario: {api_error_message(exc)}")
+    else:
+        st.success("Usuario creado.")
+        st.rerun()
+
+
+def render_users_tab() -> None:
+    title_col, action_col = st.columns([0.78, 0.22], vertical_alignment="bottom")
+    with title_col:
+        st.subheader("Usuarios")
+        st.caption("Altas, roles y estado de acceso.")
+    with action_col:
+        if st.button(
+            "Nuevo usuario",
+            icon=":material/person_add:",
+            type="primary",
+            width="stretch",
+        ):
+            render_create_usuario_dialog()
+
+    data, users = _usuarios_frame()
+    st.caption(f"Fuente: {data.get('source', 'desconocida')} · {len(users)} usuarios")
+    _render_users_summary(users)
 
     if users.empty:
         st.info("No hay usuarios cargados o la API no está disponible.")
         return
 
     st.divider()
-    st.subheader("Usuarios cargados")
+    st.markdown("#### Directorio")
 
-    filter_cols = st.columns([1, 1, 2])
+    filter_cols = st.columns([1.1, 1.2, 2.2])
     with filter_cols[0]:
         estado = st.radio(
             "Estado",
@@ -437,7 +461,11 @@ def render_users_tab() -> None:
             key="usuarios_rol_filter",
         )
     with filter_cols[2]:
-        search = st.text_input("Buscar", placeholder="email, nombre o DNI", key="usuarios_search")
+        search = st.text_input(
+            "Buscar usuario",
+            placeholder="Email, nombre o DNI",
+            key="usuarios_search",
+        )
 
     visible = users.copy()
     if estado == "Activos":

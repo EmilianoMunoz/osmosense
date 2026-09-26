@@ -28,7 +28,16 @@ def _ranking_summary(path: str | None) -> dict[str, Any]:
     if not ranking_path.exists():
         return {"path": str(ranking_path), "exists": False}
 
-    df = pd.read_csv(ranking_path)
+    summary_columns = {
+        "fecha_ranking",
+        "fecha_actual",
+        "ranking_global",
+        "prioridad",
+    }
+    df = pd.read_csv(
+        ranking_path,
+        usecols=lambda column: column in summary_columns,
+    )
     summary: dict[str, Any] = {
         "path": str(ranking_path),
         "exists": True,
@@ -84,6 +93,7 @@ def _ranking_coverage_from_postgis() -> dict[str, Any]:
                         elegible_latest
                     FROM ranking_hidrico_cobertura_fechas
                     ORDER BY fecha_ranking DESC
+                    LIMIT 30
                     """
                 )
                 rows = [

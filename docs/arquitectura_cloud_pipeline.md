@@ -111,6 +111,24 @@ Endpoints FastAPI principales:
 - `GET /clientes/{cliente_id}/rankings/latest/geojson`
 - `GET /regional/um/latest/geojson`
 
+### Consistencia de publicación
+
+El ranking se genera primero como artefacto candidato fechado. Antes de usarlo se
+valida que no esté vacío, que tenga una única fecha válida, las columnas mínimas
+y un único registro por parcela. `ranking_hidrico_latest.csv` no se reemplaza
+durante los pasos intermedios: se promueve mediante reemplazo atómico únicamente
+cuando terminan zonificación, auditorías y carga PostGIS.
+
+En PostGIS, los agregados de UM se preparan antes de insertar el ranking de la
+nueva fecha. La vista operativa solo cambia cuando el ranking alcanza la cobertura
+mínima; de este modo la vista regional no queda apuntando temporalmente a una
+fecha sin agregados. El archivo de estado también se reemplaza atómicamente y
+registra `processing`, `success`, `skipped` o `failed`.
+
+Una corrida fallida conserva el último ranking operativo tanto en PostGIS como
+en el CSV `latest`; el candidato fechado y el log quedan disponibles para
+diagnóstico.
+
 El dashboard Streamlit consume esos endpoints con token bearer y permisos por
 rol.
 

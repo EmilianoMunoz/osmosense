@@ -99,16 +99,27 @@ def _ensure_productor_assignment_profile(productor: dict) -> int:
 
 
 def render_available_parcels_tab() -> None:
-    st.subheader("Parcelas disponibles")
-    st.caption("Parcelas activas cuyo cultivo operativo todavía no es vid ni olivo.")
-
-    limit = st.number_input(
-        "Cantidad máxima a cargar en el mapa",
-        min_value=100,
-        max_value=20000,
-        value=3000,
-        step=500,
+    st.subheader("Incorporar al análisis")
+    st.caption(
+        "Reclasificá parcelas del catálogo general como vid u olivo y, si corresponde, "
+        "vinculalas con un productor."
     )
+
+    control_cols = st.columns([1.0, 1.4])
+    with control_cols[0]:
+        limit = st.selectbox(
+            "Parcelas a cargar",
+            [500, 1000, 3000, 5000],
+            index=2,
+            key="available_parcels_limit",
+        )
+    with control_cols[1]:
+        color_by = st.selectbox(
+            "Color del mapa",
+            ["cultivo_original", "cultivo_oficial", "fuente"],
+            index=0,
+            key="available_color_by",
+        )
 
     loading = render_fullscreen_loader("Cargando parcelas disponibles...")
     with st.spinner("Cargando parcelas disponibles..."):
@@ -122,21 +133,13 @@ def render_available_parcels_tab() -> None:
 
     st.caption(
         f"Fuente: {data.get('source', 'desconocida')} · "
-        f"Mostrando {len(df):,} parcelas".replace(",", ".")
+        f"{len(df):,} parcelas cargadas".replace(",", ".")
     )
 
-    col_map, col_detail = st.columns([2.2, 1.0])
+    map_col, detail_col = st.columns([2.35, 1.0], gap="large")
 
-    with col_map:
-        color_by = st.selectbox(
-            "Color",
-            ["cultivo_original", "cultivo_oficial", "fuente"],
-            index=0,
-            key="available_color_by",
-        )
-
+    with map_col:
         selected_id = st.session_state.get("selected_disponible_id")
-
         clicked_id = render_map(
             data,
             df,
@@ -147,28 +150,24 @@ def render_available_parcels_tab() -> None:
             admin_mode=True,
             map_key="available_parcels_map",
         )
-
         if clicked_id is not None:
             st.session_state["selected_disponible_id"] = clicked_id
 
-    with col_detail:
-        st.subheader("Parcela seleccionada")
-
+    with detail_col:
+        st.markdown("#### Parcela seleccionada")
         selected_id = st.session_state.get("selected_disponible_id")
-
         if selected_id is None:
             selected_id = int(df.iloc[0]["parcela_id"])
             st.session_state["selected_disponible_id"] = selected_id
 
         row = df[df["parcela_id"].astype(int) == int(selected_id)]
-
         if row.empty:
             st.info("Seleccioná una parcela disponible en el mapa.")
             return
 
         item = row.iloc[0]
-
         area = f"{item.get('area_m2', 0):.0f} m²" if pd.notna(item.get("area_m2")) else "-"
+
         with st.container(border=True):
             st.markdown(f"**Parcela {int(item['parcela_id'])}**")
             st.caption(f"Cultivo original: {item.get('cultivo_original', '-')}")
@@ -177,7 +176,9 @@ def render_available_parcels_tab() -> None:
             st.caption(f"Fuente: {item.get('fuente', '-')}")
 
         productores = _productores_disponibles()
-        productor_options = [None] + [int(productor["usuario_id"]) for productor in productores]
+        productor_options = [None] + [
+            int(productor["usuario_id"]) for productor in productores
+        ]
         productor_by_id = {
             int(productor["usuario_id"]): productor
             for productor in productores
@@ -190,19 +191,28 @@ def render_available_parcels_tab() -> None:
             }
         )
 
-        st.subheader("Activar para análisis")
-
+        st.markdown("#### Preparar incorporación")
         with st.form("preparar_activar_parcela_disponible"):
-            cultivo_destino = st.radio("Nuevo cultivo operativo", ["vid", "olivo"], horizontal=True)
-
+            cultivo_destino = st.radio(
+                "Cultivo operativo",
+                ["vid", "olivo"],
+                horizontal=True,
+            )
             productor_id = st.selectbox(
-                "Asignar productor",
+                "Productor (opcional)",
                 productor_options,
                 format_func=lambda value: productor_labels.get(value, str(value)),
             )
-
-            etiqueta = st.text_input("Etiqueta interna", value="")
-            submitted = st.form_submit_button("Revisar y confirmar")
+            etiqueta = st.text_input(
+                "Etiqueta interna",
+                value="",
+                placeholder="Ej. Cuadro norte",
+            )
+            submitted = st.form_submit_button(
+                "Revisar incorporación",
+                type="primary",
+                width="stretch",
+            )
 
         if submitted:
             render_activate_parcela_dialog(

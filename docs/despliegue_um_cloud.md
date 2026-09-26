@@ -117,6 +117,11 @@ Notas:
 - `DATABASE_URL` debe apuntar al PostGIS operativo.
 - `AUTH_SECRET` no debe ser el valor de ejemplo.
 - `API_BASE_URL` es lo que consume Streamlit para hablar con la API.
+- Para habilitar accesos rápidos únicamente en la demo controlada, configurar
+  `ENABLE_QUICK_LOGIN=true`, `ALLOW_PRODUCTION_QUICK_LOGIN=true` y las cuatro
+  variables `QUICK_LOGIN_*_PASSWORD`. Luego sincronizar sus hashes con
+  `rotar_credenciales_cloud.py --from-env --confirm --hide-passwords`. Las
+  contraseñas permanecen solo en `.env`.
 - `API_HOST=0.0.0.0` y `STREAMLIT_HOST=0.0.0.0` permiten acceso desde otra
   maquina de la red autorizada.
 
@@ -432,7 +437,8 @@ Antes de mostrar la demo desde UM-Cloud:
 
 - `APP_ENV=production`.
 - `ENABLE_LOCAL_FALLBACK=false`.
-- `ENABLE_QUICK_LOGIN=false`.
+- `ENABLE_QUICK_LOGIN=false`, o modo demo explícito con la doble bandera y
+  credenciales `QUICK_LOGIN_*_PASSWORD` protegidas en `.env`.
 - Credenciales demo reemplazadas o contraseñas rotadas.
 - `.env` con permisos restringidos al usuario de servicio.
 - `run_preflight_cloud.py --check-db` sin fallas.

@@ -552,10 +552,7 @@ def render_productor_current_parcels(productor: pd.Series) -> None:
 
 
 def render_parcel_assignment_panel() -> None:
-    st.subheader("Asignar parcelas a productor")
-    st.caption(
-        "Mostramos solo parcelas activas que todavía no están asignadas a ningún productor."
-    )
+    st.caption("Seleccioná parcelas analizadas en el mapa y prepará su asignación.")
     _render_parcelas_flash()
 
     productores = _productores_frame()
@@ -563,14 +560,32 @@ def render_parcel_assignment_panel() -> None:
         st.info("Primero cargá al menos un usuario con rol productor.")
         return
 
-    limit = st.number_input(
-        "Cantidad máxima de parcelas libres a cargar",
-        min_value=100,
-        max_value=5000,
-        value=1500,
-        step=100,
-        key="assign_parcelas_limit",
-    )
+    filter_cols = st.columns([0.9, 1.0, 1.6, 0.9], vertical_alignment="bottom")
+    with filter_cols[0]:
+        limit = st.selectbox(
+            "Parcelas a cargar",
+            [500, 1000, 1500, 3000, 5000],
+            index=2,
+            key="assign_parcelas_limit",
+        )
+    with filter_cols[1]:
+        cultivo_filter = st.selectbox(
+            "Cultivo",
+            ["Todos", "vid", "olivo"],
+            key="assign_cultivo_filter",
+        )
+    with filter_cols[2]:
+        parcela_search = st.text_input(
+            "Buscar parcela",
+            placeholder="ID de parcela",
+            key="assign_parcela_search",
+        )
+    with filter_cols[3]:
+        only_selected = st.checkbox(
+            "Solo seleccionadas",
+            value=False,
+            key="assign_only_selected",
+        )
 
     with st.spinner("Cargando parcelas libres..."):
         data = load_admin_parcelas(limit=int(limit), activo=True, sin_asignar=True)
@@ -586,26 +601,6 @@ def render_parcel_assignment_panel() -> None:
     selected_ids = _selected_assignment_ids()
     df["seleccionada"] = df["parcela_id"].astype(int).isin(selected_ids)
 
-    filter_cols = st.columns([1, 1, 1])
-    with filter_cols[0]:
-        cultivo_filter = st.selectbox(
-            "Filtrar cultivo",
-            ["Todos", "vid", "olivo"],
-            key="assign_cultivo_filter",
-        )
-    with filter_cols[1]:
-        parcela_search = st.text_input(
-            "Buscar parcela libre",
-            placeholder="ID de parcela",
-            key="assign_parcela_search",
-        )
-    with filter_cols[2]:
-        only_selected = st.checkbox(
-            "Ver solo seleccionadas",
-            value=False,
-            key="assign_only_selected",
-        )
-
     df_visible = df.copy()
     if cultivo_filter != "Todos" and "cultivo_oficial" in df_visible.columns:
         df_visible = df_visible[df_visible["cultivo_oficial"].astype(str) == cultivo_filter]
@@ -617,18 +612,19 @@ def render_parcel_assignment_panel() -> None:
     if only_selected:
         df_visible = df_visible[df_visible["seleccionada"]]
 
-    map_col, form_col = st.columns([2.2, 1.0])
+    vid_count = int((df_visible["cultivo_oficial"].astype(str) == "vid").sum())
+    olivo_count = int((df_visible["cultivo_oficial"].astype(str) == "olivo").sum())
+    count_cols = st.columns(4)
+    count_cols[0].metric("Visibles", f"{len(df_visible):,}".replace(",", "."))
+    count_cols[1].metric("Vid", f"{vid_count:,}".replace(",", "."))
+    count_cols[2].metric("Olivo", f"{olivo_count:,}".replace(",", "."))
+    count_cols[3].metric("Seleccionadas", len(selected_ids))
+
+    map_col, work_col = st.columns([2.35, 1.0], gap="large")
 
     with map_col:
-        count_cols = st.columns(3)
-        count_cols[0].metric("Parcelas visibles", f"{len(df_visible):,}".replace(",", "."))
-        vid_count = int((df_visible["cultivo_oficial"].astype(str) == "vid").sum())
-        olivo_count = int((df_visible["cultivo_oficial"].astype(str) == "olivo").sum())
-        count_cols[1].metric("Vid", f"{vid_count:,}".replace(",", "."))
-        count_cols[2].metric("Olivo", f"{olivo_count:,}".replace(",", "."))
-
         color_by = st.selectbox(
-            "Color del mapa de asignación",
+            "Color del mapa",
             ["seleccionada", "cultivo_oficial", "cultivo_original", "fuente"],
             index=0,
             key="assign_color_by",
@@ -660,57 +656,72 @@ def render_parcel_assignment_panel() -> None:
             if clicked_id is not None:
                 st.caption(f"Última parcela seleccionada: {int(clicked_id)}")
 
-    with form_col:
-        st.metric("Parcelas seleccionadas", len(selected_ids))
+    with work_col:
+        st.markdown("#### Preparar asignación")
         if selected_ids:
-            st.caption(", ".join(str(value) for value in selected_ids[:20]))
-            if len(selected_ids) > 20:
-                st.caption(f"+ {len(selected_ids) - 20} parcelas más")
+            st.caption(", ".join(str(value) for value in selected_ids[:16]))
+            if len(selected_ids) > 16:
+                st.caption(f"+ {len(selected_ids) - 16} parcelas más")
+        else:
+            st.info("Marcá una o más parcelas en el mapa.")
 
-        raw_ids = st.text_area(
-            "Agregar parcelas por ID",
-            placeholder="Ej. 43070, 43071, 43072",
-            key="assign_manual_ids",
-            height=80,
-        )
-        add_cols = st.columns(2)
-        with add_cols[0]:
-            if st.button("Agregar IDs", width="stretch", disabled=not raw_ids.strip()):
-                try:
-                    parsed_ids = _parse_parcela_ids(raw_ids)
-                    available_ids = set(df["parcela_id"].dropna().astype(int).tolist())
-                    valid_ids = [value for value in parsed_ids if value in available_ids]
-                    missing_ids = [value for value in parsed_ids if value not in available_ids]
-                    if valid_ids:
-                        _add_assignment_ids(valid_ids)
-                    if missing_ids:
-                        st.warning(
-                            "No se agregaron IDs que no están cargados como libres: "
-                            + ", ".join(str(value) for value in missing_ids[:20])
-                        )
-                    if valid_ids:
-                        st.success(f"Se agregaron {len(valid_ids)} parcelas a la selección.")
-                        st.rerun()
-                except ValueError as exc:
-                    st.error(str(exc))
-        with add_cols[1]:
-            if st.button("Limpiar selección", width="stretch", disabled=not selected_ids):
-                _clear_assignment_selection()
-                st.rerun()
-
-        if selected_ids:
-            remove_ids = st.multiselect(
-                "Quitar de la selección",
-                selected_ids,
-                key="assign_remove_ids",
+        with st.expander("Editar selección por ID"):
+            raw_ids = st.text_area(
+                "Agregar parcelas",
+                placeholder="Ej. 43070, 43071, 43072",
+                key="assign_manual_ids",
+                height=80,
             )
-            if st.button("Quitar seleccionadas", width="stretch", disabled=not remove_ids):
-                _remove_assignment_ids(remove_ids)
-                st.rerun()
+            add_cols = st.columns(2)
+            with add_cols[0]:
+                if st.button(
+                    "Agregar IDs",
+                    width="stretch",
+                    disabled=not raw_ids.strip(),
+                ):
+                    try:
+                        parsed_ids = _parse_parcela_ids(raw_ids)
+                        available_ids = set(df["parcela_id"].dropna().astype(int).tolist())
+                        valid_ids = [value for value in parsed_ids if value in available_ids]
+                        missing_ids = [value for value in parsed_ids if value not in available_ids]
+                        if valid_ids:
+                            _add_assignment_ids(valid_ids)
+                        if missing_ids:
+                            st.warning(
+                                "No se agregaron IDs que no están cargados como libres: "
+                                + ", ".join(str(value) for value in missing_ids[:20])
+                            )
+                        if valid_ids:
+                            st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+            with add_cols[1]:
+                if st.button(
+                    "Limpiar",
+                    width="stretch",
+                    disabled=not selected_ids,
+                    key="assign_clear_selection",
+                ):
+                    _clear_assignment_selection()
+                    st.rerun()
+
+            if selected_ids:
+                remove_ids = st.multiselect(
+                    "Quitar de la selección",
+                    selected_ids,
+                    key="assign_remove_ids",
+                )
+                if st.button(
+                    "Quitar IDs",
+                    width="stretch",
+                    disabled=not remove_ids,
+                ):
+                    _remove_assignment_ids(remove_ids)
+                    st.rerun()
 
         productor_search = st.text_input(
             "Buscar productor",
-            placeholder="nombre, email o DNI",
+            placeholder="Nombre, email o DNI",
             key="assign_productor_search",
         )
         productores_visibles = _filter_productores(productores, productor_search)
@@ -739,34 +750,22 @@ def render_parcel_assignment_panel() -> None:
             key="assign_cultivo_destino",
         )
         etiqueta = st.text_input(
-            "Etiqueta para la relación",
-            placeholder="Ej. Cuadro norte, lote nuevo",
+            "Etiqueta de la relación",
+            placeholder="Ej. Cuadro norte",
             key="assign_etiqueta",
         )
 
         productor = productor_by_id[int(target_usuario_id)]
         productor_cliente_id = _cliente_id_from_productor(productor)
         st.caption(
-            "Estado del productor: "
-            + (
-                "ya tiene parcelas vinculadas."
-                if productor_cliente_id is not None
-                else "sin parcelas vinculadas todavía."
-            )
+            "Productor con parcelas vinculadas."
+            if productor_cliente_id is not None
+            else "Productor sin parcelas vinculadas todavía."
         )
 
-        if selected_ids:
-            with st.container(border=True):
-                st.markdown("**Resumen previo**")
-                st.caption(f"Productor: {_productor_label(productor)}")
-                st.caption(f"Cultivo operativo: {cultivo_destino}")
-                st.caption(f"Parcelas: {len(selected_ids)}")
-                st.caption(", ".join(str(value) for value in selected_ids[:15]))
-                if len(selected_ids) > 15:
-                    st.caption(f"+ {len(selected_ids) - 15} parcelas más")
-
         if st.button(
-            "Revisar y confirmar",
+            "Revisar asignación",
+            icon=":material/arrow_forward:",
             type="primary",
             width="stretch",
             disabled=not selected_ids,
@@ -780,14 +779,65 @@ def render_parcel_assignment_panel() -> None:
             }
             render_assignment_confirmation_dialog()
 
-    st.divider()
-    render_productor_current_parcels(productor)
+
+def render_parcel_unassignment_panel() -> None:
+    st.caption("Elegí un productor y marcá en el mapa las parcelas que querés retirar.")
+    _render_parcelas_flash()
+
+    productores = _productores_frame()
+    if productores.empty:
+        st.info("No hay productores activos.")
+        return
+
+    selector_cols = st.columns([1.2, 2.0])
+    with selector_cols[0]:
+        search = st.text_input(
+            "Buscar productor",
+            placeholder="Nombre, email o DNI",
+            key="unassign_productor_search",
+        )
+    productores_visibles = _filter_productores(productores, search)
+    if productores_visibles.empty:
+        st.info("No hay productores que coincidan con la búsqueda.")
+        return
+
+    productor_ids = [
+        int(value) for value in productores_visibles["usuario_id"].dropna().tolist()
+    ]
+    productor_by_id = {
+        int(row["usuario_id"]): row
+        for _, row in productores_visibles.iterrows()
+    }
+    with selector_cols[1]:
+        target_usuario_id = st.selectbox(
+            "Productor",
+            productor_ids,
+            format_func=lambda value: _productor_label(productor_by_id[int(value)]),
+            key="unassign_productor_target",
+        )
+
+    render_productor_current_parcels(productor_by_id[int(target_usuario_id)])
 
 
 def render_parcelas_tab() -> None:
-    st.subheader("Parcelas")
-    st.caption("Asignación directa de parcelas a productores y desasignación desde mapa.")
-    render_parcel_assignment_panel()
+    st.subheader("Asignaciones")
+    st.caption("Administrá qué parcelas puede consultar cada productor.")
+
+    operation = st.segmented_control(
+        "Operación",
+        ["Asignar libres", "Desasignar actuales"],
+        default="Asignar libres",
+        label_visibility="collapsed",
+        key="parcel_assignment_operation",
+        width="stretch",
+    )
+    operation = operation or "Asignar libres"
+
+    if operation == "Asignar libres":
+        render_parcel_assignment_panel()
+        return
+
+    render_parcel_unassignment_panel()
 
 
 def render_clientes_tab() -> None:

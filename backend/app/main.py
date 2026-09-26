@@ -2,6 +2,7 @@ from collections.abc import Callable
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.services.auth import authenticate_user, verify_access_token
@@ -176,6 +177,7 @@ app = FastAPI(
     version="0.1.0",
     description="API para ranking hídrico de parcelas de vid y olivo.",
 )
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 @app.get("/health")

@@ -137,7 +137,20 @@ def render_pipeline_status() -> None:
     coverage_rejected = coverage_status == "ultima_fecha_descartada_por_cobertura"
     skipped = bool(state.get("skipped", False))
     failed = bool(state.get("failed", False))
-    if failed:
+    processing = state.get("status") == "processing"
+    processing_stale = processing and run_age_days is not None and run_age_days > 1
+    if processing_stale:
+        status_label = "Ejecución interrumpida"
+        status_message = (
+            "La última corrida quedó marcada como en ejecución, pero no registra "
+            "actividad reciente. Revisar el servicio y su log."
+        )
+        st.error(status_message)
+    elif processing:
+        status_label = "En ejecución"
+        status_message = "El pipeline está procesando una nueva corrida."
+        st.info(status_message)
+    elif failed:
         status_label = "Error"
         status_message = "La última ejecución del pipeline terminó con error."
         st.error(status_message)

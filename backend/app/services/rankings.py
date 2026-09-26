@@ -1,5 +1,6 @@
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -284,7 +285,23 @@ def _read_optional_audit(path: str | Path, columns: list[str]) -> pd.DataFrame:
     if not audit_path.exists():
         return pd.DataFrame(columns=columns)
 
-    df = pd.read_csv(audit_path)
+    stat = audit_path.stat()
+    return _read_optional_audit_cached(
+        str(audit_path),
+        tuple(columns),
+        stat.st_mtime_ns,
+        stat.st_size,
+    ).copy()
+
+
+@lru_cache(maxsize=16)
+def _read_optional_audit_cached(
+    path: str,
+    columns: tuple[str, ...],
+    _mtime_ns: int,
+    _size: int,
+) -> pd.DataFrame:
+    df = pd.read_csv(path)
     present = [column for column in columns if column in df.columns]
     if "parcela_id" not in present:
         return pd.DataFrame(columns=columns)
@@ -832,7 +849,7 @@ def latest_from_postgis(limit: int | None = None) -> list[dict[str, Any]]:
     ]
 
 
-def latest_geojson_from_postgis(simplify_meters: float | None = None) -> dict[str, Any]:
+def _build_latest_geojson_from_postgis(simplify_meters: float) -> dict[str, Any]:
     import psycopg
 
     simplify_value = float(simplify_meters or 0.0)
@@ -880,6 +897,63 @@ def latest_geojson_from_postgis(simplify_meters: float | None = None) -> dict[st
             result = cur.fetchone()[0]
 
     return _enrich_feature_collection_quality(result)
+
+
+def _quality_files_signature() -> tuple[tuple[str, int, int], ...]:
+    signature = []
+    for path in (
+        AUDIT_VECINOS_CSV,
+        AUDIT_TEMPORAL_CSV,
+        AUDIT_RUIDO_CSV,
+        AUDIT_HISTORICAL_METRICS_CSV,
+    ):
+        file_path = Path(path)
+        if file_path.exists():
+            stat = file_path.stat()
+            signature.append((str(file_path), stat.st_mtime_ns, stat.st_size))
+        else:
+            signature.append((str(file_path), 0, 0))
+    return tuple(signature)
+
+
+def _postgis_latest_geojson_version() -> tuple[str, ...]:
+    import psycopg
+
+    query = """
+        SELECT
+            max(r.fecha_ranking),
+            count(r.parcela_id),
+            max(r.created_at),
+            max(p.updated_at)
+        FROM ranking_hidrico_latest r
+        LEFT JOIN parcelas p
+            ON p.parcela_id = r.parcela_id
+    """
+    with psycopg.connect(database_url()) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query)
+            row = cur.fetchone()
+    return tuple(str(value) if value is not None else "" for value in (row or ()))
+
+
+@lru_cache(maxsize=4)
+def _cached_latest_geojson_from_postgis(
+    simplify_meters: float,
+    _data_version: tuple[str, ...],
+    _quality_version: tuple[tuple[str, int, int], ...],
+) -> dict[str, Any]:
+    return _build_latest_geojson_from_postgis(simplify_meters)
+
+
+def latest_geojson_from_postgis(
+    simplify_meters: float | None = None,
+) -> dict[str, Any]:
+    simplify_value = float(simplify_meters or 0.0)
+    return _cached_latest_geojson_from_postgis(
+        simplify_value,
+        _postgis_latest_geojson_version(),
+        _quality_files_signature(),
+    )
 
 
 def clientes_from_postgis() -> list[dict[str, Any]]:

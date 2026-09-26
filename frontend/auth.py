@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import requests
 import streamlit as st
@@ -59,6 +59,25 @@ QUICK_LOGIN_USERS = {
 }
 
 
+QUICK_LOGIN_PASSWORD_ENV = {
+    "admin": "QUICK_LOGIN_ADMIN_PASSWORD",
+    "finca": "QUICK_LOGIN_PRODUCTOR_VID_PASSWORD",
+    "olivar": "QUICK_LOGIN_PRODUCTOR_OLIVO_PASSWORD",
+    "regional": "QUICK_LOGIN_REGIONAL_PASSWORD",
+}
+
+
+def quick_login_users() -> dict[str, QuickLoginUser]:
+    load_dotenv()
+    return {
+        key: replace(
+            user,
+            password=os.getenv(QUICK_LOGIN_PASSWORD_ENV[key]) or user.password,
+        )
+        for key, user in QUICK_LOGIN_USERS.items()
+    }
+
+
 def api_base_url() -> str:
     load_dotenv()
     return os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -106,7 +125,7 @@ def login_from_api(username: str, password: str) -> tuple[bool, str | None, bool
 
 
 def login_quick_user(key: str) -> None:
-    user = QUICK_LOGIN_USERS[key]
+    user = quick_login_users()[key]
     ok, message, api_available = login_from_api(user.username, user.password)
     if ok:
         st.rerun()
@@ -275,7 +294,7 @@ def render_login() -> None:
                     """
                     <div class="quick-title">Accesos rápidos</div>
                     <div class="quick-caption">
-                        Inician sesión contra la API real con usuarios operativos de desarrollo.
+                        Inician sesión contra la API real con usuarios operativos configurados.
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -300,7 +319,7 @@ def render_login() -> None:
                 st.markdown(
                     """
                     <div class="credentials-caption">
-                        Usuarios PostGIS: admin@osmosense.local/admin123 · productor.vid@osmosense.local/cliente123 · productor.olivo@osmosense.local/cliente123 · regional@osmosense.local/regional123
+                        Accesos disponibles para administración, productores y autoridad regional.
                     </div>
                     """,
                     unsafe_allow_html=True,

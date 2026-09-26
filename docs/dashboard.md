@@ -164,19 +164,24 @@ viejas.
 ### Admin
 
 - encabezado compacto con selector segmentado entre `Análisis` y `Gestión`;
-- la acción `Recargar` vuelve a consultar los datos, pero no ejecuta el pipeline;
+- la acción `Recargar datos` vuelve a consultar los datos, pero no ejecuta el pipeline;
 - en `Análisis`, selector lazy de secciones: `Estado`, `Mapa`, `Ranking`,
   `Calidad`, `Revisión`. Solo se renderiza la sección activa
   para evitar construir mapa y tablas pesadas en cada rerun;
+- `Estado`, `Ranking` y `Calidad` consumen `/rankings/latest` sin geometrías;
+  `Mapa` y `Revisión` cargan el GeoJSON enriquecido solo cuando se necesitan;
 - cada sección muestra la fecha del ranking operativo, el universo total y la
   cantidad de parcelas visibles con los filtros activos;
 - en `Estado`, separa `Ranking operativo` de `Última corrida`: si la corrida
   Sentinel más reciente no alcanza cobertura suficiente, se informa que fue
   descartada para uso operativo y se conserva la última fecha confiable;
-- en `Gestión`, dos secciones principales: `Usuarios` y `Parcelas`;
-- en `Usuarios`, alta, edición, reactivación y desactivación trazable de
-  accesos. Los productores requieren apellido y DNI válido;
-- en `Parcelas`, subsecciones `Asignar y desasignar` y `Agregar al análisis`;
+- en `Gestión`, navegación segmentada entre `Usuarios`, `Asignaciones` e
+  `Incorporar al análisis`;
+- en `Usuarios`, el alta se abre en un diálogo y el directorio concentra filtros,
+  edición, reactivación y desactivación. Los productores requieren apellido y DNI
+  válido;
+- en `Asignaciones`, los modos `Asignar libres` y `Desasignar actuales` evitan
+  renderizar dos mapas simultáneamente;
 - la vista se deriva del rol autenticado y no puede cambiarse desde el sidebar;
 - mapa operativo filtrado por defecto con `Foco operativo` (`alta` y `crítica`);
 - alcance alternativo para todas las prioridades o una selección personalizada;
@@ -196,8 +201,8 @@ viejas.
   el clic sobre una parcela agrega o quita su ID de la selección a desasignar;
 - confirmación en popup luego de asignar o desasignar, con productor,
   cantidad de parcelas, IDs afectados y conteo antes/después;
-- pestaña de parcelas disponibles para activar no vid/no olivo como `vid` u
-  `olivo` y asignarlas opcionalmente a un productor;
+- la sección `Incorporar al análisis` permite activar parcelas no vid/no olivo
+  como `vid` u `olivo` y asignarlas opcionalmente a un productor;
 - `Calidad` resume cobertura, evaluadas, sin ranking y confianza alta mediante
   métricas. Los detalles de confianza y evaluación aparecen solo cuando hay
   estados heterogéneos o anomalías;
@@ -351,6 +356,11 @@ venv/bin/python backend/scripts/maintenance/generar_geojson_dashboard_parcelas.p
 ```
 
 El dashboard Admin usa la geometría optimizada por defecto. La optimización no
+
+Las respuestas HTTP mayores a 1 KiB se comprimen con gzip. El GeoJSON completo
+se cachea en backend por versión de ranking, actualización de parcelas y versión
+de los archivos de auditoría. Una nueva corrida o edición de parcela invalida la
+entrada automáticamente, sin conservar datos operativos viejos.
 modifica la geometría persistida ni los modelos; solo cambia la geometría
 enviada al navegador para dibujar el mapa.
 

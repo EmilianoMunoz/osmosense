@@ -60,5 +60,7 @@ responde, la vista muestra error.
 ## Sesión
 
 El login manual usa `POST /auth/login` cuando la API está disponible. Los
-botones rápidos también usan la API/PostGIS real, pero quedan disponibles solo
-en desarrollo (`ENABLE_QUICK_LOGIN=true` y `APP_ENV` distinto de `production`).
+botones rápidos también usan la API/PostGIS real. En producción quedan
+deshabilitados por defecto; una demo controlada debe habilitarlos con
+`ENABLE_QUICK_LOGIN=true`, `ALLOW_PRODUCTION_QUICK_LOGIN=true` y contraseñas
+`QUICK_LOGIN_*_PASSWORD` guardadas solo en `.env`.

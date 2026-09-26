@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -328,11 +329,82 @@ def path_salida(rankings_dir: Path, fecha: str) -> Path:
     return rankings_dir / f"ranking_hidrico_{fecha}.csv"
 
 
+def _temporary_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.{os.getpid()}.tmp")
+
+
+def _write_csv_atomic(df: pd.DataFrame, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = _temporary_path(path)
+    try:
+        df.to_csv(temporary, index=False)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _copy_atomic(source: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = _temporary_path(target)
+    try:
+        shutil.copyfile(source, temporary)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def guardar_estado(state_dir: Path, state: dict) -> None:
     state_dir.mkdir(parents=True, exist_ok=True)
     state_path = state_dir / "pipeline_hidrico_state.json"
-    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    temporary = _temporary_path(state_path)
+    try:
+        temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        temporary.replace(state_path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
+
+def validar_ranking_generado(ranking: pd.DataFrame) -> None:
+    required = {
+        "fecha_actual",
+        "parcela_id",
+        "cultivo",
+        "ranking_global",
+        "prioridad",
+    }
+    missing = sorted(required - set(ranking.columns))
+    if missing:
+        raise RuntimeError(f"Ranking generado sin columnas requeridas: {missing}")
+    if ranking.empty:
+        raise RuntimeError("El ranking generado no contiene parcelas.")
+    if ranking["parcela_id"].isna().any():
+        raise RuntimeError("El ranking generado contiene parcela_id nulos.")
+    if ranking["parcela_id"].duplicated().any():
+        raise RuntimeError("El ranking generado contiene parcelas duplicadas.")
+    fechas = pd.to_datetime(ranking["fecha_actual"], errors="coerce")
+    if fechas.isna().any() or fechas.dt.date.nunique() != 1:
+        raise RuntimeError("El ranking generado debe contener una única fecha válida.")
+
+
+def ranking_candidato(state: dict) -> str:
+    return str(state.get("ranking_candidate") or state["ranking_latest"])
+
+
+def promover_ranking_latest(
+    args: argparse.Namespace,
+    state: dict,
+    log_path: Path,
+) -> None:
+    source = Path(ranking_candidato(state))
+    target = Path(state["ranking_latest"])
+    if args.dry_run:
+        log(f"Dry-run: se promovería {source} como {target}", log_path)
+        return
+    if not source.exists():
+        raise FileNotFoundError(f"No existe ranking candidato para promover: {source}")
+    _copy_atomic(source, target)
+    state["ranking_latest_promoted"] = True
+    log(f"Ranking latest promovido atómicamente: {target}", log_path)
 
 def ejecutar_ranking(args: argparse.Namespace, log_path: Path) -> dict:
     df_temporal = pd.read_csv(args.input)
@@ -344,6 +416,7 @@ def ejecutar_ranking(args: argparse.Namespace, log_path: Path) -> dict:
         args.parcelas,
         args.max_reading_age_days,
     )
+    validar_ranking_generado(ranking)
     fecha_usada = ranking["fecha_actual"].iloc[0]
 
     rankings_dir = Path(args.rankings_dir)
@@ -352,13 +425,13 @@ def ejecutar_ranking(args: argparse.Namespace, log_path: Path) -> dict:
     latest_path = rankings_dir / "ranking_hidrico_latest.csv"
 
     if not args.dry_run:
-        ranking.to_csv(output_path, index=False)
-        ranking.to_csv(latest_path, index=False)
+        _write_csv_atomic(ranking, output_path)
 
     state = {
         "mode": args.mode,
         "last_run_utc": utc_now(),
         "skipped": False,
+        "status": "processing",
         "fecha_rankeada": fecha_usada,
         "input_temporal": args.input,
         "model_dir": args.model_dir,
@@ -366,6 +439,7 @@ def ejecutar_ranking(args: argparse.Namespace, log_path: Path) -> dict:
         "parcelas_geojson": args.parcelas,
         "ranking_output": str(output_path),
         "ranking_latest": str(latest_path),
+        "ranking_candidate": str(output_path),
         "parcelas": int(len(ranking)),
         "distribucion_cultivo": ranking["cultivo"].value_counts().to_dict(),
         "distribucion_prioridad": ranking["prioridad"].value_counts().to_dict(),
@@ -373,7 +447,7 @@ def ejecutar_ranking(args: argparse.Namespace, log_path: Path) -> dict:
     if not args.dry_run:
         guardar_estado(Path(args.state_dir), state)
 
-    log(f"Ranking generado: {output_path}", log_path)
+    log(f"Ranking candidato generado: {output_path}", log_path)
     log(f"Fecha rankeada: {fecha_usada}", log_path)
     log(f"Parcelas: {len(ranking)}", log_path)
     log(f"Prioridades: {state['distribucion_prioridad']}", log_path)
@@ -393,7 +467,7 @@ def ejecutar_zonificacion_um(
         "--parcelas",
         args.parcelas,
         "--ranking",
-        state["ranking_latest"],
+        ranking_candidato(state),
         "--out-dir",
         ZONIFICACION_OUT_DIR,
     ]
@@ -467,7 +541,7 @@ def guardar_snapshot_auditorias(
     metadata = {
         "fecha_rankeada": fecha,
         "created_utc": utc_now(),
-        "ranking_latest": state.get("ranking_latest"),
+        "ranking_latest": ranking_candidato(state),
         "score_column": args.quality_score_column,
         "files": copied,
     }
@@ -512,7 +586,7 @@ def ejecutar_auditorias_calidad(
         sys.executable,
         "backend/scripts/audit/auditar_vecinos_ranking.py",
         "--ranking",
-        state["ranking_latest"],
+        ranking_candidato(state),
         "--parcelas",
         args.parcelas,
         "--score-column",
@@ -675,7 +749,7 @@ def cargar_ranking_postgis(args: argparse.Namespace, state: dict, log_path: Path
         sys.executable,
         "backend/scripts/postgis/cargar_ranking_postgis.py",
         "--input",
-        state["ranking_latest"],
+        ranking_candidato(state),
         "--model-dir",
         args.model_dir,
         "--ranking-config",
@@ -715,6 +789,18 @@ def cargar_zonificacion_postgis(args: argparse.Namespace, state: dict, log_path:
 def ejecutar_pipeline(args: argparse.Namespace, log_path: Path) -> None:
     log(f"Inicio pipeline hidrico mode={args.mode}", log_path)
     log(f"Dry run: {args.dry_run}", log_path)
+    running_state = {
+        "mode": args.mode,
+        "last_run_utc": utc_now(),
+        "status": "processing",
+        "skipped": False,
+        "input_temporal": args.input,
+        "log_path": str(log_path),
+        "update_sentinel": args.update_sentinel,
+        "load_postgis": args.load_postgis,
+    }
+    if not args.dry_run:
+        guardar_estado(Path(args.state_dir), running_state)
     quality_enabled = args.run_quality_audits or args.backfill_outlier_history
     total_steps = (
         2
@@ -752,6 +838,8 @@ def ejecutar_pipeline(args: argparse.Namespace, log_path: Path) -> None:
             "update_sentinel": args.update_sentinel,
             "load_postgis": args.load_postgis,
             "skipped": True,
+            "status": "skipped",
+            "completed_at_utc": utc_now(),
             "reason": "sin_fecha_nueva",
         }
         if not args.dry_run:
@@ -786,15 +874,21 @@ def ejecutar_pipeline(args: argparse.Namespace, log_path: Path) -> None:
         log("Auditorias de calidad omitidas", log_path)
 
     if args.load_postgis:
-        log(f"Paso {step}/{total_steps}: cargar ranking en PostGIS", log_path)
-        cargar_ranking_postgis(args, state, log_path)
+        log(f"Paso {step}/{total_steps}: publicar datos en PostGIS", log_path)
         if args.update_zonificacion_um:
+            # La UM se prepara primero; el ranking se inserta al final y recién entonces
+            # la vista latest puede cambiar de fecha de forma consistente.
             cargar_zonificacion_postgis(args, state, log_path)
+        cargar_ranking_postgis(args, state, log_path)
         state["postgis_loaded"] = not args.dry_run
-        if not args.dry_run:
-            guardar_estado(Path(args.state_dir), state)
     else:
         log("Carga PostGIS omitida", log_path)
+
+    promover_ranking_latest(args, state, log_path)
+    state["status"] = "success"
+    state["completed_at_utc"] = utc_now()
+    if not args.dry_run:
+        guardar_estado(Path(args.state_dir), state)
 
     log("Pipeline finalizado correctamente", log_path)
     print(json.dumps(state, indent=2), flush=True)
@@ -817,6 +911,8 @@ def main() -> None:
             "load_postgis": args.load_postgis,
             "skipped": False,
             "failed": True,
+            "status": "failed",
+            "completed_at_utc": utc_now(),
             "reason": "error",
             "error_type": type(exc).__name__,
             "error": "La ejecución falló; consultar el log restringido del pipeline.",

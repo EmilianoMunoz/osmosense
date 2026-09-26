@@ -10,6 +10,8 @@ import pandas as pd
 import backend.app.services.rankings as rankings
 from backend.scripts.pipeline import run_pipeline_hidrico as pipeline
 from frontend.components import tables
+from frontend.data import ranking_items_to_feature_collection
+from frontend.views.dashboard import admin_requires_detailed_data
 
 
 class PipelineResilienceTest(unittest.TestCase):
@@ -111,6 +113,145 @@ class PipelineResilienceTest(unittest.TestCase):
         self.assertEqual(state["error_type"], "RuntimeError")
         self.assertNotIn("secret", json.dumps(state))
 
+    def test_generated_ranking_rejects_duplicate_parcels(self):
+        frame = pd.DataFrame(
+            {
+                "fecha_actual": ["2026-09-20", "2026-09-20"],
+                "parcela_id": [10, 10],
+                "cultivo": ["vid", "vid"],
+                "ranking_global": [1, 2],
+                "prioridad": ["alta", "media"],
+            }
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "duplicadas"):
+            pipeline.validar_ranking_generado(frame)
+
+    def test_latest_is_promoted_atomically_only_when_requested(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            candidate = root / "ranking_2026-09-20.csv"
+            latest = root / "ranking_latest.csv"
+            candidate.write_text("new", encoding="utf-8")
+            latest.write_text("old", encoding="utf-8")
+            args = Namespace(dry_run=False)
+            state = {
+                "ranking_candidate": str(candidate),
+                "ranking_latest": str(latest),
+            }
+
+            pipeline.promover_ranking_latest(args, state, root / "pipeline.log")
+
+            self.assertEqual(latest.read_text(encoding="utf-8"), "new")
+            self.assertTrue(state["ranking_latest_promoted"])
+            self.assertFalse(any(root.glob("*.tmp")))
+
+    def test_postgis_publication_prepares_zoning_before_ranking(self):
+        events = []
+        args = Namespace(
+            mode="cloud",
+            run_quality_audits=False,
+            backfill_outlier_history=False,
+            update_zonificacion_um=True,
+            load_postgis=True,
+            update_sentinel=False,
+            input="dataset.csv",
+            dry_run=True,
+            state_dir="state",
+        )
+        state = {
+            "ranking_candidate": "candidate.csv",
+            "ranking_latest": "latest.csv",
+        }
+
+        def prepare_zoning(_args, current_state, _log_path):
+            events.append("prepare_zoning")
+            return current_state
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "pipeline.log"
+            with (
+                patch.object(pipeline, "ultima_fecha_dataset", return_value="2026-09-20"),
+                patch.object(pipeline, "ejecutar_ranking", return_value=state.copy()),
+                patch.object(
+                    pipeline,
+                    "ejecutar_zonificacion_um",
+                    side_effect=prepare_zoning,
+                ),
+                patch.object(
+                    pipeline,
+                    "cargar_zonificacion_postgis",
+                    side_effect=lambda *_: events.append("zoning_postgis"),
+                ),
+                patch.object(
+                    pipeline,
+                    "cargar_ranking_postgis",
+                    side_effect=lambda *_: events.append("ranking_postgis"),
+                ),
+                patch.object(
+                    pipeline,
+                    "promover_ranking_latest",
+                    side_effect=lambda *_: events.append("promote_latest"),
+                ),
+            ):
+                pipeline.ejecutar_pipeline(args, log_path)
+
+        self.assertEqual(
+            events,
+            [
+                "prepare_zoning",
+                "zoning_postgis",
+                "ranking_postgis",
+                "promote_latest",
+            ],
+        )
+
+    def test_compact_ranking_keeps_dataframe_contract_without_geometry(self):
+        result = ranking_items_to_feature_collection(
+            {
+                "source": "postgis",
+                "count": 1,
+                "items": [
+                    {
+                        "parcela_id": 10,
+                        "ranking_global": 1,
+                        "cultivo": "vid",
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(result["source"], "postgis")
+        self.assertEqual(result["features"][0]["properties"]["parcela_id"], 10)
+        self.assertIsNone(result["features"][0]["geometry"])
+
+    def test_admin_only_requires_full_payload_for_map_or_review(self):
+        self.assertFalse(admin_requires_detailed_data("Estado", "Operación"))
+        self.assertFalse(admin_requires_detailed_data("Ranking", "Operación"))
+        self.assertTrue(admin_requires_detailed_data("Mapa", "Operación"))
+        self.assertTrue(admin_requires_detailed_data("Estado", "Revisión técnica"))
+
+    def test_full_geojson_cache_reuses_same_data_version(self):
+        rankings._cached_latest_geojson_from_postgis.cache_clear()
+        expected = {"type": "FeatureCollection", "features": []}
+        with (
+            patch.object(
+                rankings,
+                "_postgis_latest_geojson_version",
+                return_value=("2026-09-20", "10"),
+            ),
+            patch.object(rankings, "_quality_files_signature", return_value=()),
+            patch.object(
+                rankings,
+                "_build_latest_geojson_from_postgis",
+                return_value=expected,
+            ) as build,
+        ):
+            first = rankings.latest_geojson_from_postgis(2)
+            second = rankings.latest_geojson_from_postgis(2)
+
+        self.assertIs(first, second)
+        build.assert_called_once_with(2.0)
 
 if __name__ == "__main__":
     unittest.main()

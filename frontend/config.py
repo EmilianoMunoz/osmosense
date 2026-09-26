@@ -36,4 +36,10 @@ def local_fallback_enabled() -> bool:
 
 
 def quick_login_enabled() -> bool:
-    return (not is_production()) and env_flag("ENABLE_QUICK_LOGIN", True)
+    enabled = env_flag("ENABLE_QUICK_LOGIN", not is_production())
+    if not enabled:
+        return False
+    return (not is_production()) or env_flag(
+        "ALLOW_PRODUCTION_QUICK_LOGIN",
+        False,
+    )

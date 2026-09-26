@@ -165,6 +165,31 @@ def apply_brand_theme() -> None:
             color: {BRAND_AQUA} !important;
         }}
 
+        /* Controles segmentados: evita el rojo por defecto de Streamlit. */
+        div[data-testid="stButtonGroup"] button[aria-checked="true"],
+        div[data-testid="stButtonGroup"] button[aria-pressed="true"],
+        div[data-testid="stSegmentedControl"] button[aria-checked="true"],
+        div[data-testid="stSegmentedControl"] button[aria-pressed="true"] {{
+            background: rgba(18, 194, 207, 0.14) !important;
+            border-color: {BRAND_AQUA} !important;
+            color: {BRAND_AQUA} !important;
+            box-shadow: inset 0 0 0 1px rgba(18, 194, 207, 0.2) !important;
+        }}
+
+        div[data-testid="stButtonGroup"] button[aria-checked="true"] *,
+        div[data-testid="stButtonGroup"] button[aria-pressed="true"] *,
+        div[data-testid="stSegmentedControl"] button[aria-checked="true"] *,
+        div[data-testid="stSegmentedControl"] button[aria-pressed="true"] * {{
+            color: {BRAND_AQUA} !important;
+            fill: {BRAND_AQUA} !important;
+        }}
+
+        div[data-testid="stButtonGroup"] button:hover,
+        div[data-testid="stSegmentedControl"] button:hover {{
+            border-color: {BRAND_PRIMARY} !important;
+            color: {BRAND_AQUA} !important;
+        }}
+
         /* Selectbox / input focus */
         div[data-baseweb="select"] > div:focus-within,
         div[data-baseweb="input"] > div:focus-within {{
