@@ -38,7 +38,8 @@ from frontend.components.client_overview import (
 from frontend.table_config import CLIENT_FORBIDDEN_COLUMNS, column_labels, table_columns
 from frontend.views.admin.fields import _parse_parcela_ids
 from frontend.views.admin.users import _build_usuario_payload
-from frontend.views.dashboard import ADMIN_ANALYSIS_SECTIONS
+from frontend.views.dashboard import ADMIN_ANALYSIS_SECTIONS, PRODUCER_SECTIONS
+from frontend.views.regional import REGIONAL_SECTIONS
 
 
 class FrontendLogicTest(unittest.TestCase):
@@ -523,6 +524,13 @@ class FrontendLogicTest(unittest.TestCase):
         self.assertEqual(
             ADMIN_ANALYSIS_SECTIONS,
             ["Estado", "Mapa", "Ranking", "Calidad", "Revisión"],
+        )
+
+    def test_role_views_share_segmented_navigation_order(self):
+        self.assertEqual(PRODUCER_SECTIONS, ["Mapa", "Resumen", "Parcelas"])
+        self.assertEqual(
+            REGIONAL_SECTIONS,
+            ["Mapa", "Foco regional", "Ranking UM", "Parcelas de la UM"],
         )
 
     def test_client_parcela_label_hides_ranking_and_score(self):

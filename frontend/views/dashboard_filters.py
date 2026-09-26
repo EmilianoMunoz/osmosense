@@ -22,6 +22,12 @@ ADMIN_COLOR_OPTIONS = {
     "Prioridad": "prioridad_visual",
     "Confianza de lectura": "confianza_lectura",
 }
+PRODUCER_FILTER_KEYS = (
+    "producer_priority_scope",
+    "producer_cultivos",
+    "producer_prioridades",
+)
+
 ADMIN_FILTER_KEYS = (
     "admin_review_mode",
     "admin_color_label",
@@ -90,28 +96,13 @@ def select_cliente(admin_mode: bool) -> tuple[int | None, str | None]:
     return int(selected_cliente_id), selected_cliente_name
 
 
-def select_priority_mode(admin_mode: bool) -> str:
-    if admin_mode:
-        return "Umbrales fijos"
-
-    client_priority_mode = st.sidebar.radio(
-        "Criterio de prioridad",
-        ["General", "Mis parcelas"],
-        index=1,
-        help=(
-            "General usa la prioridad del modelo. Mis parcelas compara solo "
-            "las parcelas visibles del productor."
-        ),
-    )
-    return (
-        "Relativa por percentiles"
-        if client_priority_mode == "Mis parcelas"
-        else "Umbrales fijos"
-    )
-
-
 def _reset_admin_filters() -> None:
     for key in ADMIN_FILTER_KEYS:
+        st.session_state.pop(key, None)
+
+
+def _reset_producer_filters() -> None:
+    for key in PRODUCER_FILTER_KEYS:
         st.session_state.pop(key, None)
 
 
@@ -297,47 +288,74 @@ def apply_admin_sidebar_filters(
     return ranked_df, filtered, color_by, priority_mode
 
 
-def apply_sidebar_filters(
+def apply_producer_sidebar_filters(
     df: pd.DataFrame,
-    admin_mode: bool,
-    priority_mode: str = "",
-) -> tuple[pd.DataFrame, str]:
-    color_options = [
-        option
-        for option in ["prioridad_visual", "confianza_lectura"]
-        if option in df.columns
-    ]
-    if not admin_mode:
-        color_options = [
-            option for option in color_options if option == "prioridad_visual"
-        ]
+) -> tuple[pd.DataFrame, pd.DataFrame, str, str]:
+    with st.sidebar.form("producer_filters", border=False):
+        st.markdown("### Vista")
+        priority_scope = st.segmented_control(
+            "Criterio de prioridad",
+            ["General", "Mis parcelas"],
+            default="Mis parcelas",
+            key="producer_priority_scope",
+            width="stretch",
+            help=(
+                "General conserva la prioridad del modelo. Mis parcelas "
+                "compara únicamente las parcelas visibles del productor."
+            ),
+        )
+        priority_scope = priority_scope or "Mis parcelas"
+        priority_mode = (
+            "Relativa por percentiles"
+            if priority_scope == "Mis parcelas"
+            else "Umbrales fijos"
+        )
+        ranked_df = add_dynamic_priority(df, priority_mode)
 
-    color_by = st.sidebar.selectbox(
-        "Color del mapa",
-        color_options,
-        index=0,
-        format_func=lambda value: {
-            "prioridad_visual": "Prioridad",
-            "confianza_lectura": "Confianza de lectura",
-        }.get(value, value),
-    )
-    st.sidebar.header("Filtros")
-    cultivos = st.sidebar.multiselect(
-        "Cultivo",
-        options=sorted(df["cultivo"].dropna().unique()),
-        default=sorted(df["cultivo"].dropna().unique()),
-    )
-    prioridades = st.sidebar.multiselect(
-        "Prioridad",
-        options=priority_options(df),
-        default=priority_options(df),
-        format_func=lambda value: str(value).capitalize(),
-    )
-    filtered = df[
-        df["cultivo"].isin(cultivos)
-        & df["prioridad_visual"].isin(prioridades)
+        st.markdown("### Filtros")
+        crop_options = sorted(ranked_df["cultivo"].dropna().unique())
+        cultivos = st.multiselect(
+            "Cultivo",
+            options=crop_options,
+            default=crop_options,
+            key="producer_cultivos",
+        )
+        available_priorities = priority_options(ranked_df)
+        prioridades = st.multiselect(
+            "Prioridad",
+            options=available_priorities,
+            default=available_priorities,
+            key="producer_prioridades",
+            format_func=lambda value: str(value).capitalize(),
+        )
+
+        apply_col, reset_col = st.columns([1.2, 1])
+        with apply_col:
+            st.form_submit_button(
+                "Aplicar",
+                type="primary",
+                icon=":material/filter_alt:",
+                width="stretch",
+            )
+        with reset_col:
+            st.form_submit_button(
+                "Reiniciar",
+                type="tertiary",
+                icon=":material/restart_alt:",
+                help="Restablecer filtros",
+                width="stretch",
+                on_click=_reset_producer_filters,
+            )
+
+    filtered = ranked_df[
+        ranked_df["cultivo"].isin(cultivos)
+        & ranked_df["prioridad_visual"].isin(prioridades)
     ].copy()
-    return filtered, color_by
+    st.sidebar.caption(
+        f"{_format_count(len(filtered))} de "
+        f"{_format_count(len(ranked_df))} parcelas visibles"
+    )
+    return ranked_df, filtered, "prioridad_visual", priority_mode
 
 
 def sync_geojson_properties_from_df(data: dict, df: pd.DataFrame) -> dict:

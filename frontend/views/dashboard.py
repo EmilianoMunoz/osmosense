@@ -13,7 +13,6 @@ from frontend.data import (
     load_my_geojson,
     load_ranking_overview,
 )
-from frontend.logic import add_dynamic_priority
 from frontend.map import bbox_center_zoom, render_map
 from frontend.components.branding import apply_brand_theme, render_fullscreen_loader
 from frontend.components.charts import render_distribution, render_prediction_panel
@@ -31,14 +30,15 @@ from frontend.views.admin.status import (
 )
 from frontend.views.dashboard_filters import (
     apply_admin_sidebar_filters,
-    apply_sidebar_filters,
+    apply_producer_sidebar_filters,
     select_cliente,
-    select_priority_mode,
     select_view_mode,
     sync_geojson_properties_from_df,
 )
 from frontend.views.regional import render_regional_view
 
+
+PRODUCER_SECTIONS = ["Mapa", "Resumen", "Parcelas"]
 
 ADMIN_ANALYSIS_SECTIONS = [
     "Estado",
@@ -434,8 +434,25 @@ def render_dashboard() -> None:
         )
         admin_area = admin_area or "Análisis"
     else:
-        st.title("Mis parcelas")
-        st.caption("Lectura de atención hídrica y evolución esperada · San Rafael")
+        header_title, header_refresh = st.columns(
+            [0.82, 0.18],
+            vertical_alignment="bottom",
+        )
+        with header_title:
+            st.title("Mis parcelas")
+            st.caption(
+                "Lectura de atención hídrica y evolución esperada · San Rafael"
+            )
+        with header_refresh:
+            if st.button(
+                "Recargar datos",
+                icon=":material/refresh:",
+                type="tertiary",
+                help="Volver a consultar el último ranking disponible",
+                width="stretch",
+                key="producer_refresh",
+            ):
+                refresh_dashboard_data()
 
     if admin_mode and admin_area == "Gestión":
         render_admin_management_area()
@@ -477,13 +494,7 @@ def render_dashboard() -> None:
     if admin_mode:
         df, filtered, color_by, priority_mode = apply_admin_sidebar_filters(df)
     else:
-        priority_mode = select_priority_mode(admin_mode)
-        df = add_dynamic_priority(df, priority_mode)
-        filtered, color_by = apply_sidebar_filters(
-            df=df,
-            admin_mode=admin_mode,
-            priority_mode=priority_mode,
-        )
+        df, filtered, color_by, priority_mode = apply_producer_sidebar_filters(df)
 
     producer_context = "me" if producer_self_mode else selected_cliente_id
     priority_context = f"{view_mode}:{producer_context}:{priority_mode}"
@@ -511,8 +522,17 @@ def render_dashboard() -> None:
     render_operational_ranking_notice(filtered)
     render_client_metrics(filtered)
     render_client_field_status(filtered)
-    tab_mapa, tab_resumen, tab_datos = st.tabs(["Mapa", "Resumen", "Parcelas"])
-    with tab_mapa:
+    active_section = st.segmented_control(
+        "Sección de productor",
+        PRODUCER_SECTIONS,
+        default="Mapa",
+        label_visibility="collapsed",
+        key="producer_section",
+        width="stretch",
+    )
+    active_section = active_section or "Mapa"
+
+    if active_section == "Mapa":
         render_map_tab(
             data=data,
             filtered=filtered,
@@ -522,9 +542,10 @@ def render_dashboard() -> None:
             selected_cliente_id=selected_cliente_id,
             priority_mode=priority_mode,
         )
+        return
 
-    with tab_resumen:
+    if active_section == "Resumen":
         render_client_field_overview(filtered)
+        return
 
-    with tab_datos:
-        render_data_tab(filtered, admin_mode)
+    render_data_tab(filtered, admin_mode)

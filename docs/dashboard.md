@@ -224,7 +224,11 @@ predicciones crudas `riesgo_pred_*`.
 
 ### Productor
 
-- pestañas en orden: `Mapa`, `Resumen`, `Parcelas`;
+- navegación segmentada en orden: `Mapa`, `Resumen`, `Parcelas`; solo se
+  renderiza la sección activa;
+- encabezado consistente con acción terciaria `Recargar datos`;
+- filtros laterales agrupados en un formulario con acciones `Aplicar` y
+  `Reiniciar`;
 - aviso superior con la fecha de `Ranking operativo usado`, para aclarar que la
   vista usa el último ranking con cobertura suficiente;
 - métricas separadas para `Ranking operativo` y `Lectura satelital`: la primera
@@ -254,7 +258,7 @@ predicciones crudas `riesgo_pred_*`.
   fecha de lectura;
 - listado de parcelas para revisar primero, sin exponer columnas técnicas;
 - tabla simplificada de sus parcelas con nombres legibles;
-- sin pestaña de revisión técnica.
+- sin sección de revisión técnica.
 - sin gráfico de distribución de prioridades, porque no aporta una acción clara
   para el productor;
 - sin recomendación directa de riego: el usuario interpreta la información con
@@ -305,10 +309,12 @@ En producto, la entidad visible es `productor`. Los nombres `clientes` y
 
 ### Regional
 
-- pestañas en orden: `Mapa regional`, `Foco regional`, `Ranking UM`,
-  `Parcelas de la UM`;
+- navegación segmentada en orden: `Mapa`, `Foco regional`, `Ranking UM`,
+  `Parcelas de la UM`; solo se renderiza la sección activa;
+- encabezado consistente con acción terciaria `Recargar datos`;
 - mapa de UM DGI con parcelas oficiales de vid/olivo;
-- filtros por cuenca, prioridad regional y mínimo de parcelas;
+- filtros por cuenca, prioridad regional y mínimo de parcelas, agrupados con
+  acciones `Aplicar` y `Reiniciar`;
 - categorización por umbrales fijos o relativa por percentiles dentro de las
   UM visibles;
 - color por prioridad regional, score promedio, porcentaje alta/crítica o
@@ -320,7 +326,7 @@ En producto, la entidad visible es `productor`. Los nombres `clientes` y
 - al seleccionar una UM en el mapa se muestra un detalle con fecha de ranking,
   score regional, riesgo actual, riesgo proyectado a 10 días, composición
   vid/olivo y cobertura de parcelas rankeadas.
-- la pestaña `Parcelas de la UM` muestra las parcelas que explican la UM
+- la sección `Parcelas de la UM` muestra las parcelas que explican la UM
   seleccionada, su ranking, riesgo, prioridad y un mapa filtrado a esa zona.
 
 Fuente local:

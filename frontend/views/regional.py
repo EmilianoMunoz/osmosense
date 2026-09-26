@@ -22,6 +22,15 @@ from frontend.logic import add_dynamic_priority, add_regional_dynamic_priority
 from frontend.map import bbox_center_zoom, render_map, selected_parcela_id
 
 
+REGIONAL_SECTIONS = ["Mapa", "Foco regional", "Ranking UM", "Parcelas de la UM"]
+REGIONAL_FILTER_KEYS = (
+    "regional_priority_mode",
+    "regional_color_label",
+    "regional_cuencas",
+    "regional_min_parcelas",
+    "regional_prioridades",
+)
+
 COLOR_OPTIONS = {
     "Prioridad regional": "prioridad_regional_visual",
     "Riesgo promedio": "prioridad_score_prom_pond",
@@ -51,48 +60,102 @@ def render_regional_metrics(df: pd.DataFrame) -> None:
     col5.metric("Fecha ranking", fecha)
 
 
+def _reset_regional_filters() -> None:
+    for key in REGIONAL_FILTER_KEYS:
+        st.session_state.pop(key, None)
+
+
+def refresh_regional_data() -> None:
+    st.cache_data.clear()
+    for key in ["selected_um_id", "selected_regional_parcela_id"]:
+        st.session_state.pop(key, None)
+    st.rerun()
+
+
 def render_regional_sidebar(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
-    st.sidebar.header("Zonificación regional")
-    priority_mode = st.sidebar.radio(
-        "Categorización",
-        ["Umbrales fijos", "Relativa por percentiles"],
-        help=(
-            "Umbrales fijos usa la prioridad regional calculada por el ranking. "
-            "Relativa por percentiles compara solo las UM visibles según su score regional."
-        ),
-    )
-    color_label = st.sidebar.selectbox("Color del mapa", list(COLOR_OPTIONS), index=0)
-    color_by = COLOR_OPTIONS[color_label]
+    with st.sidebar.form("regional_filters", border=False):
+        st.markdown("### Vista regional")
+        priority_mode = st.segmented_control(
+            "Categorización",
+            ["Fija", "Relativa"],
+            default="Fija",
+            key="regional_priority_mode",
+            width="stretch",
+            help=(
+                "Umbrales fijos conserva la prioridad regional del ranking. "
+                "Percentiles compara únicamente las UM visibles."
+            ),
+        )
+        priority_scope = priority_mode or "Fija"
+        priority_mode = (
+            "Relativa por percentiles"
+            if priority_scope == "Relativa"
+            else "Umbrales fijos"
+        )
+        color_label = st.selectbox(
+            "Color del mapa",
+            list(COLOR_OPTIONS),
+            index=0,
+            key="regional_color_label",
+        )
+        color_by = COLOR_OPTIONS[color_label]
 
-    cuencas = st.sidebar.multiselect(
-        "Cuenca",
-        options=sorted(df["cuenca"].dropna().unique()),
-        default=sorted(df["cuenca"].dropna().unique()),
-    )
-    min_parcelas = st.sidebar.slider(
-        "Mínimo de parcelas por UM",
-        1,
-        int(df["parcelas_total"].max()),
-        1,
-    )
+        st.markdown("### Filtros")
+        basin_options = sorted(df["cuenca"].dropna().unique())
+        cuencas = st.multiselect(
+            "Cuenca",
+            options=basin_options,
+            default=basin_options,
+            key="regional_cuencas",
+        )
+        min_parcelas = st.slider(
+            "Mínimo de parcelas por UM",
+            1,
+            int(df["parcelas_total"].max()),
+            1,
+            key="regional_min_parcelas",
+        )
 
-    base = df[
-        df["cuenca"].isin(cuencas)
-        & (df["parcelas_total"] >= min_parcelas)
-    ].copy()
-    base = add_regional_dynamic_priority(base, priority_mode)
+        base = df[
+            df["cuenca"].isin(cuencas)
+            & (df["parcelas_total"] >= min_parcelas)
+        ].copy()
+        base = add_regional_dynamic_priority(base, priority_mode)
+        available_priorities = [
+            priority
+            for priority in PRIORIDAD_ORDEN_MAPA
+            if priority in set(base["prioridad_regional_visual"].dropna())
+        ]
+        prioridades = st.multiselect(
+            "Prioridad regional",
+            options=available_priorities,
+            default=available_priorities,
+            key="regional_prioridades",
+            format_func=lambda value: value.capitalize(),
+        )
 
-    priority_options = [
-        p for p in PRIORIDAD_ORDEN_MAPA if p in set(base["prioridad_regional_visual"].dropna())
-    ]
-    prioridades = st.sidebar.multiselect(
-        "Prioridad regional",
-        options=priority_options,
-        default=priority_options,
-        format_func=lambda value: value.capitalize(),
-    )
+        apply_col, reset_col = st.columns([1.2, 1])
+        with apply_col:
+            st.form_submit_button(
+                "Aplicar",
+                type="primary",
+                icon=":material/filter_alt:",
+                width="stretch",
+            )
+        with reset_col:
+            st.form_submit_button(
+                "Reiniciar",
+                type="tertiary",
+                icon=":material/restart_alt:",
+                help="Restablecer filtros",
+                width="stretch",
+                on_click=_reset_regional_filters,
+            )
 
     filtered = base[base["prioridad_regional_visual"].isin(prioridades)].copy()
+    st.sidebar.caption(
+        f"{len(filtered):,} de {len(df):,} UM visibles".replace(",", ".")
+    )
     return filtered, color_by
 
 
@@ -530,10 +593,12 @@ def render_um_parcelas_tab() -> None:
 
     st.subheader("Parcelas dentro de la UM")
     st.download_button(
-        "Descargar parcelas de la UM CSV",
+        "Descargar parcelas de la UM",
         data=dataframe_to_csv_bytes(parcelas),
         file_name=f"parcelas_um_{int(selected_id)}.csv",
         mime="text/csv",
+        type="tertiary",
+        icon=":material/download:",
     )
     render_um_parcelas_table(parcelas)
 
@@ -591,20 +656,36 @@ def render_regional_table(df: pd.DataFrame) -> None:
     }
     table = df.sort_values("ranking_um")[cols].rename(columns=labels)
     st.download_button(
-        "Descargar ranking UM CSV",
+        "Descargar ranking UM",
         data=dataframe_to_csv_bytes(table),
         file_name="ranking_um.csv",
         mime="text/csv",
+        type="tertiary",
+        icon=":material/download:",
     )
     st.dataframe(table, hide_index=True, width="stretch")
 
 
 def render_regional_view() -> None:
-    st.title("Seguimiento regional por UM")
-    st.caption(
-        "Unidades de manejo DGI con cultivos objetivo dentro de San Rafael. "
-        "La vista compara zonas para seguimiento regional, no parcelas individuales."
+    header_title, header_refresh = st.columns(
+        [0.82, 0.18],
+        vertical_alignment="bottom",
     )
+    with header_title:
+        st.title("Seguimiento regional")
+        st.caption(
+            "Unidades de manejo DGI con cultivos objetivo · San Rafael"
+        )
+    with header_refresh:
+        if st.button(
+            "Recargar datos",
+            icon=":material/refresh:",
+            type="tertiary",
+            help="Volver a consultar la zonificación y el ranking disponibles",
+            width="stretch",
+            key="regional_refresh",
+        ):
+            refresh_regional_data()
 
     loading = render_fullscreen_loader("Cargando zonificación regional...")
     with st.spinner("Cargando zonificación regional..."):
@@ -627,13 +708,23 @@ def render_regional_view() -> None:
         return
 
     filtered, color_by = render_regional_sidebar(df)
-    filtered_data = filter_zonificacion_geojson(data, set(filtered["zona_id"].astype(int)))
+    filtered_data = filter_zonificacion_geojson(
+        data,
+        set(filtered["zona_id"].astype(int)),
+    )
 
     render_regional_metrics(filtered)
-    tab_mapa, tab_foco, tab_datos, tab_parcelas = st.tabs(
-        ["Mapa regional", "Foco regional", "Ranking UM", "Parcelas de la UM"]
+    active_section = st.segmented_control(
+        "Sección regional",
+        REGIONAL_SECTIONS,
+        default="Mapa",
+        label_visibility="collapsed",
+        key="regional_section",
+        width="stretch",
     )
-    with tab_mapa:
+    active_section = active_section or "Mapa"
+
+    if active_section == "Mapa":
         left, right = st.columns([2.2, 1.0])
         with left:
             clicked_id = render_regional_map(
@@ -646,9 +737,14 @@ def render_regional_view() -> None:
                 st.session_state["selected_um_id"] = clicked_id
         with right:
             render_regional_side_panel(filtered)
-    with tab_datos:
-        render_regional_table(filtered)
-    with tab_foco:
+        return
+
+    if active_section == "Foco regional":
         render_regional_focus_tab(filtered)
-    with tab_parcelas:
-        render_um_parcelas_tab()
+        return
+
+    if active_section == "Ranking UM":
+        render_regional_table(filtered)
+        return
+
+    render_um_parcelas_tab()
