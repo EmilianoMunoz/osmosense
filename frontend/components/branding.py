@@ -12,6 +12,7 @@ BRAND_PRIMARY = "#0c818a"
 BRAND_PRIMARY_HOVER = "#096d75"
 BRAND_PRIMARY_ACTIVE = "#075b62"
 BRAND_AQUA = "#12C2CF"
+BRAND_NAV_ACTIVE = "#738BFF"
 
 
 def logo_exists() -> bool:
@@ -165,29 +166,31 @@ def apply_brand_theme() -> None:
             color: {BRAND_AQUA} !important;
         }}
 
-        /* Controles segmentados: evita el rojo por defecto de Streamlit. */
-        div[data-testid="stButtonGroup"] button[aria-checked="true"],
-        div[data-testid="stButtonGroup"] button[aria-pressed="true"],
-        div[data-testid="stSegmentedControl"] button[aria-checked="true"],
-        div[data-testid="stSegmentedControl"] button[aria-pressed="true"] {{
-            background: rgba(18, 194, 207, 0.14) !important;
-            border-color: {BRAND_AQUA} !important;
-            color: {BRAND_AQUA} !important;
-            box-shadow: inset 0 0 0 1px rgba(18, 194, 207, 0.2) !important;
+        /* Navegación segmentada: azul lavanda, sin semántica de riesgo. */
+        div[data-testid="stButtonGroup"] button[kind="segmented_controlActive"],
+        div[data-testid="stButtonGroup"] button[data-testid="stBaseButton-segmented_controlActive"],
+        div[data-testid="stSegmentedControl"] button[kind="segmented_controlActive"],
+        div[data-testid="stSegmentedControl"] button[data-testid="stBaseButton-segmented_controlActive"] {{
+            background: rgba(115, 139, 255, 0.14) !important;
+            border-color: {BRAND_NAV_ACTIVE} !important;
+            color: {BRAND_NAV_ACTIVE} !important;
+            box-shadow: inset 0 0 0 1px rgba(115, 139, 255, 0.22) !important;
         }}
 
-        div[data-testid="stButtonGroup"] button[aria-checked="true"] *,
-        div[data-testid="stButtonGroup"] button[aria-pressed="true"] *,
-        div[data-testid="stSegmentedControl"] button[aria-checked="true"] *,
-        div[data-testid="stSegmentedControl"] button[aria-pressed="true"] * {{
-            color: {BRAND_AQUA} !important;
-            fill: {BRAND_AQUA} !important;
+        div[data-testid="stButtonGroup"] button[kind="segmented_controlActive"] *,
+        div[data-testid="stButtonGroup"] button[data-testid="stBaseButton-segmented_controlActive"] *,
+        div[data-testid="stSegmentedControl"] button[kind="segmented_controlActive"] *,
+        div[data-testid="stSegmentedControl"] button[data-testid="stBaseButton-segmented_controlActive"] * {{
+            color: {BRAND_NAV_ACTIVE} !important;
+            fill: {BRAND_NAV_ACTIVE} !important;
         }}
 
-        div[data-testid="stButtonGroup"] button:hover,
-        div[data-testid="stSegmentedControl"] button:hover {{
-            border-color: {BRAND_PRIMARY} !important;
-            color: {BRAND_AQUA} !important;
+        div[data-testid="stButtonGroup"] button[kind="segmented_control"]:hover,
+        div[data-testid="stButtonGroup"] button[data-testid="stBaseButton-segmented_control"]:hover,
+        div[data-testid="stSegmentedControl"] button[kind="segmented_control"]:hover,
+        div[data-testid="stSegmentedControl"] button[data-testid="stBaseButton-segmented_control"]:hover {{
+            border-color: {BRAND_NAV_ACTIVE} !important;
+            color: {BRAND_NAV_ACTIVE} !important;
         }}
 
         /* Selectbox / input focus */
