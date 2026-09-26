@@ -12,7 +12,7 @@ BRAND_PRIMARY = "#0c818a"
 BRAND_PRIMARY_HOVER = "#096d75"
 BRAND_PRIMARY_ACTIVE = "#075b62"
 BRAND_AQUA = "#12C2CF"
-BRAND_NAV_ACTIVE = "#738BFF"
+BRAND_NAV_ACTIVE = BRAND_PRIMARY
 
 
 def logo_exists() -> bool:
@@ -166,15 +166,15 @@ def apply_brand_theme() -> None:
             color: {BRAND_AQUA} !important;
         }}
 
-        /* Navegación segmentada: azul lavanda, sin semántica de riesgo. */
+        /* Navegación segmentada: mismo teal que las acciones principales. */
         div[data-testid="stButtonGroup"] button[kind="segmented_controlActive"],
         div[data-testid="stButtonGroup"] button[data-testid="stBaseButton-segmented_controlActive"],
         div[data-testid="stSegmentedControl"] button[kind="segmented_controlActive"],
         div[data-testid="stSegmentedControl"] button[data-testid="stBaseButton-segmented_controlActive"] {{
-            background: rgba(115, 139, 255, 0.14) !important;
+            background: rgba(12, 129, 138, 0.14) !important;
             border-color: {BRAND_NAV_ACTIVE} !important;
             color: {BRAND_NAV_ACTIVE} !important;
-            box-shadow: inset 0 0 0 1px rgba(115, 139, 255, 0.22) !important;
+            box-shadow: inset 0 0 0 1px rgba(12, 129, 138, 0.22) !important;
         }}
 
         div[data-testid="stButtonGroup"] button[kind="segmented_controlActive"] *,
