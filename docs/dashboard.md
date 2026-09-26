@@ -163,10 +163,13 @@ viejas.
 
 ### Admin
 
-- entrada al área `Análisis` o `Gestión`;
-- en `Análisis`, selector lazy de secciones: `Estado`, `Mapa operativo`,
-  `Datos`, `Cobertura`, `Revisión técnica`. Solo se renderiza la sección activa
+- encabezado compacto con selector segmentado entre `Análisis` y `Gestión`;
+- la acción `Recargar` vuelve a consultar los datos, pero no ejecuta el pipeline;
+- en `Análisis`, selector lazy de secciones: `Estado`, `Mapa`, `Ranking`,
+  `Calidad`, `Revisión`. Solo se renderiza la sección activa
   para evitar construir mapa y tablas pesadas en cada rerun;
+- cada sección muestra la fecha del ranking operativo, el universo total y la
+  cantidad de parcelas visibles con los filtros activos;
 - en `Estado`, separa `Ranking operativo` de `Última corrida`: si la corrida
   Sentinel más reciente no alcanza cobertura suficiente, se informa que fue
   descartada para uso operativo y se conserva la última fecha confiable;
@@ -185,7 +188,8 @@ viejas.
 - pestaña de estado general con métricas del universo completo y de la vista
   activa;
 - panel de proyección actual, 5 días y 10 días;
-- pestaña de revisión técnica de outliers/calidad;
+- `Revisión` muestra únicamente outliers y casos de calidad; si no existen,
+  presenta un estado vacío sin tablas operativas ajenas a la revisión;
 - asignación de parcelas analizadas sin productor mediante mapa o carga manual
   de IDs;
 - desasignación de parcelas mediante mapa filtrado al productor seleccionado:
@@ -194,10 +198,13 @@ viejas.
   cantidad de parcelas, IDs afectados y conteo antes/después;
 - pestaña de parcelas disponibles para activar no vid/no olivo como `vid` u
   `olivo` y asignarlas opcionalmente a un productor;
-- pestaña de cobertura con evaluadas, sin ranking y confianza de lectura;
-- top de parcelas críticas;
-- resumen por cultivo;
-- tabla completa de ranking y auditoría.
+- `Calidad` resume cobertura, evaluadas, sin ranking y confianza alta mediante
+  métricas. Los detalles de confianza y evaluación aparecen solo cuando hay
+  estados heterogéneos o anomalías;
+- `Ranking` muestra por defecto ocho columnas operativas, valores redondeados y
+  orden por prioridad;
+- el toggle `Mostrar columnas técnicas` habilita la tabla completa de ranking,
+  predicciones crudas, índices y variables de auditoría.
 
 La vista Admin muestra proyecciones operativas:
 

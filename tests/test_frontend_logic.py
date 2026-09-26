@@ -492,7 +492,7 @@ class FrontendLogicTest(unittest.TestCase):
     def test_admin_analysis_sections_keep_lazy_order(self):
         self.assertEqual(
             ADMIN_ANALYSIS_SECTIONS,
-            ["Estado", "Mapa operativo", "Datos", "Cobertura", "Revisión técnica"],
+            ["Estado", "Mapa", "Ranking", "Calidad", "Revisión"],
         )
 
     def test_client_parcela_label_hides_ranking_and_score(self):

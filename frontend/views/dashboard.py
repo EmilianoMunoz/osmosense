@@ -21,9 +21,7 @@ from frontend.components.metrics import render_client_metrics
 from frontend.components.parcel_detail import render_client_parcel_dialog, render_parcel_dialog
 from frontend.components.tables import (
     build_table_dataframe,
-    render_cultivo_summary,
     render_review_cases,
-    render_top_criticas,
 )
 from frontend.views.admin import render_admin_management_area
 from frontend.views.admin.status import (
@@ -43,11 +41,17 @@ from frontend.views.regional import render_regional_view
 
 ADMIN_ANALYSIS_SECTIONS = [
     "Estado",
-    "Mapa operativo",
-    "Datos",
-    "Cobertura",
-    "Revisión técnica",
+    "Mapa",
+    "Ranking",
+    "Calidad",
+    "Revisión",
 ]
+LEGACY_ADMIN_SECTIONS = {
+    "Mapa operativo": "Mapa",
+    "Datos": "Ranking",
+    "Cobertura": "Calidad",
+    "Revisión técnica": "Revisión",
+}
 
 
 def _format_dashboard_date(value: object) -> str:
@@ -71,7 +75,7 @@ def render_operational_ranking_notice(df: pd.DataFrame) -> None:
 
 
 def render_coverage_tab(df: pd.DataFrame) -> None:
-    st.subheader("Cobertura")
+    st.subheader("Calidad de datos")
 
     if df.empty:
         st.info("No hay datos para mostrar.")
@@ -88,26 +92,93 @@ def render_coverage_tab(df: pd.DataFrame) -> None:
     )
 
     coverage["cobertura_%"] = (coverage["evaluadas"] / coverage["parcelas"] * 100).round(2)
+    total = len(df)
+    evaluated = int(df["ranking_global"].notna().sum())
+    missing_count = total - evaluated
+    coverage_percent = evaluated / total * 100 if total else 0.0
+    confidence_high = 0
+    confidence_total = 0
+    if "confianza_lectura" in df.columns:
+        confidence_total = int(df["confianza_lectura"].notna().sum())
+        confidence_high = int((df["confianza_lectura"] == "alta").sum())
+    confidence_percent = (
+        confidence_high / confidence_total * 100 if confidence_total else None
+    )
 
-    st.dataframe(coverage, hide_index=True, width="stretch")
+    metrics = st.columns(4)
+    metrics[0].metric("Cobertura", f"{coverage_percent:.1f}%")
+    metrics[1].metric("Evaluadas", f"{evaluated:,}".replace(",", "."))
+    metrics[2].metric("Sin ranking", f"{missing_count:,}".replace(",", "."))
+    metrics[3].metric(
+        "Confianza alta",
+        f"{confidence_percent:.1f}%" if confidence_percent is not None else "-",
+    )
+
+    all_readings_high_confidence = confidence_total == total and confidence_high == total
+    if missing_count == 0 and all_readings_high_confidence:
+        st.success("Cobertura completa y confianza alta en todas las lecturas.")
+    elif missing_count == 0:
+        st.success("Todas las parcelas cuentan con evaluación operativa.")
+    else:
+        st.warning(
+            f"Hay {missing_count:,} parcelas pendientes de ranking.".replace(",", ".")
+        )
+
+    coverage_display = coverage.rename(
+        columns={
+            "cultivo": "Cultivo",
+            "parcelas": "Parcelas",
+            "evaluadas": "Evaluadas",
+            "sin_ranking": "Sin ranking",
+            "cobertura_%": "Cobertura (%)",
+        }
+    )
+
+    st.dataframe(coverage_display, hide_index=True, width="stretch")
 
     if "confianza_lectura" in df.columns:
-        st.subheader("Confianza de lectura")
         confidence = (
             df.groupby(["cultivo", "confianza_lectura"], dropna=False)
             .agg(parcelas=("parcela_id", "count"))
             .reset_index()
         )
-        st.dataframe(confidence, hide_index=True, width="stretch")
+        confidence_values = set(df["confianza_lectura"].dropna().astype(str))
+        if confidence_values != {"alta"}:
+            confidence_display = confidence.rename(
+                columns={
+                    "cultivo": "Cultivo",
+                    "confianza_lectura": "Confianza",
+                    "parcelas": "Parcelas",
+                }
+            )
+            with st.expander("Detalle de confianza"):
+                st.dataframe(
+                    confidence_display,
+                    hide_index=True,
+                    width="stretch",
+                )
 
     if "estado_evaluacion" in df.columns:
-        st.subheader("Estado de evaluación")
         estado = (
             df.groupby(["cultivo", "estado_evaluacion"], dropna=False)
             .agg(parcelas=("parcela_id", "count"))
             .reset_index()
         )
-        st.dataframe(estado, hide_index=True, width="stretch")
+        evaluation_values = set(df["estado_evaluacion"].dropna().astype(str))
+        if evaluation_values != {"Evaluada"}:
+            estado_display = estado.rename(
+                columns={
+                    "cultivo": "Cultivo",
+                    "estado_evaluacion": "Estado",
+                    "parcelas": "Parcelas",
+                }
+            )
+            with st.expander("Detalle de evaluación"):
+                st.dataframe(
+                    estado_display,
+                    hide_index=True,
+                    width="stretch",
+                )
 
     missing = df[df["ranking_global"].isna()].copy()
 
@@ -189,31 +260,43 @@ def render_map_tab(
                 "lectura simple del estado actual y su evolución esperada."
             )
 
+
 def render_review_tab(filtered: pd.DataFrame) -> None:
-    st.subheader("Casos a revisar")
+    st.subheader("Revisión técnica")
     render_review_cases(filtered)
-
-    lower_left, lower_right = st.columns([1.15, 1.0])
-
-    with lower_left:
-        st.subheader("Top prioridad")
-        render_top_criticas(filtered, limit=15)
-
-    with lower_right:
-        st.subheader("Resumen por cultivo")
-        render_cultivo_summary(filtered)
 
 
 def render_data_tab(filtered: pd.DataFrame, admin_mode: bool) -> None:
-    st.subheader("Ranking y auditoría" if admin_mode else "Listado de parcelas")
+    technical = False
+    if admin_mode:
+        title_col, mode_col = st.columns([0.72, 0.28], vertical_alignment="bottom")
+        with title_col:
+            st.subheader("Ranking de parcelas")
+            st.caption(
+                "Vista operativa ordenada por prioridad. Activá el detalle "
+                "técnico para auditar variables del modelo."
+            )
+        with mode_col:
+            technical = st.toggle(
+                "Mostrar columnas técnicas",
+                value=False,
+                key="admin_show_technical_columns",
+            )
+    else:
+        st.subheader("Listado de parcelas")
 
-    table_df = build_table_dataframe(filtered, admin_mode)
+    table_df = build_table_dataframe(
+        filtered,
+        admin_mode,
+        technical=technical,
+    )
 
     if table_df.empty:
         st.info("No hay columnas disponibles para mostrar.")
         return
 
-    st.dataframe(table_df, hide_index=True, width="stretch")
+    st.caption(f"{len(table_df):,} parcelas visibles.".replace(",", "."))
+    st.dataframe(table_df, hide_index=True, width="stretch", height=540)
 
 
 def refresh_dashboard_data() -> None:
@@ -236,19 +319,36 @@ def render_admin_analysis_area(
     selected_cliente_id: int | None,
     priority_mode: str,
 ) -> None:
-    active_section = st.radio(
+    current_section = st.session_state.get("admin_analysis_section")
+    if current_section in LEGACY_ADMIN_SECTIONS:
+        st.session_state["admin_analysis_section"] = LEGACY_ADMIN_SECTIONS[
+            current_section
+        ]
+
+    ranking_date = "-"
+    if "fecha_ranking" in df.columns and df["fecha_ranking"].notna().any():
+        ranking_date = _format_dashboard_date(df["fecha_ranking"].dropna().iloc[0])
+
+    st.caption(
+        f"Ranking operativo: {ranking_date} · "
+        f"{len(df):,} parcelas totales · ".replace(",", ".")
+        + f"{len(filtered):,} visibles con los filtros actuales".replace(",", ".")
+    )
+    active_section = st.segmented_control(
         "Sección de análisis",
         ADMIN_ANALYSIS_SECTIONS,
-        horizontal=True,
+        default="Estado",
         label_visibility="collapsed",
         key="admin_analysis_section",
+        width="stretch",
     )
+    active_section = active_section or "Estado"
 
     if active_section == "Estado":
         render_admin_status_tab(df, filtered)
         return
 
-    if active_section == "Mapa operativo":
+    if active_section == "Mapa":
         render_map_tab(
             data=data,
             filtered=filtered,
@@ -260,15 +360,15 @@ def render_admin_analysis_area(
         )
         return
 
-    if active_section == "Datos":
+    if active_section == "Ranking":
         render_data_tab(filtered, admin_mode=True)
         return
 
-    if active_section == "Cobertura":
+    if active_section == "Calidad":
         render_coverage_tab(df)
         return
 
-    if active_section == "Revisión técnica":
+    if active_section == "Revisión":
         render_review_tab(filtered)
         return
 
@@ -295,20 +395,33 @@ def render_dashboard() -> None:
 
     admin_area = "Análisis"
     if admin_mode:
-        header_left, header_right = st.columns([0.68, 0.32])
-        with header_left:
+        header_title, header_mode, header_refresh = st.columns(
+            [0.56, 0.30, 0.14],
+            vertical_alignment="bottom",
+        )
+        with header_title:
             st.title("Panel admin")
-            st.caption("Ranking hídrico, calidad de datos y gestión operativa · San Rafael")
-        with header_right:
-            st.caption("Sección")
-            admin_area = st.radio(
-                "Sección",
+            st.caption(
+                "Ranking hídrico, calidad de datos y gestión operativa · San Rafael"
+            )
+        with header_mode:
+            admin_area = st.segmented_control(
+                "Área",
                 ["Análisis", "Gestión"],
-                horizontal=True,
+                default="Análisis",
                 label_visibility="collapsed",
                 key="admin_area",
+                width="stretch",
             )
-            if st.button("Actualizar datos", width="stretch"):
+            admin_area = admin_area or "Análisis"
+        with header_refresh:
+            if st.button(
+                "Recargar",
+                icon=":material/refresh:",
+                type="tertiary",
+                help="Volver a consultar los datos sin ejecutar el pipeline",
+                width="stretch",
+            ):
                 refresh_dashboard_data()
     else:
         st.title("Mis parcelas")

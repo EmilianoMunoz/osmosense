@@ -7,15 +7,14 @@ from frontend.logic import display_delta, display_risk, review_priority
 from frontend.table_config import column_labels, table_columns
 
 
-def render_review_cases(df: pd.DataFrame) -> None:
+def review_cases_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     required = {"parcela_id", "ranking_global"}
     if df.empty or not required <= set(df.columns):
-        return
+        return pd.DataFrame()
 
     review = df[df.apply(review_priority, axis=1) < 99].copy()
     if review.empty:
-        st.info("No hay casos de calidad para revisar con los filtros actuales.")
-        return
+        return pd.DataFrame()
 
     review["orden_revision"] = review.apply(review_priority, axis=1)
     sort_candidates = [
@@ -77,7 +76,20 @@ def render_review_cases(df: pd.DataFrame) -> None:
         if col in review.columns:
             review[col] = review[col].round(2)
 
-    st.dataframe(review[cols].head(80), hide_index=True, width="stretch")
+    return review[cols].head(80).rename(columns=column_labels(cols))
+
+
+def render_review_cases(df: pd.DataFrame) -> int:
+    review = review_cases_dataframe(df)
+    if review.empty:
+        st.success("No se detectaron casos técnicos para revisar con los filtros actuales.")
+        return 0
+
+    st.caption(
+        f"{len(review):,} casos ordenados por prioridad de revisión.".replace(",", ".")
+    )
+    st.dataframe(review, hide_index=True, width="stretch")
+    return len(review)
 
 
 def render_cultivo_summary(df: pd.DataFrame) -> None:
@@ -149,10 +161,33 @@ def render_top_criticas(df: pd.DataFrame, limit: int = 15) -> None:
     st.dataframe(top[cols].rename(columns=labels), hide_index=True, width="stretch")
 
 
-def build_table_dataframe(filtered: pd.DataFrame, admin_mode: bool) -> pd.DataFrame:
-    cols = table_columns(admin_mode, set(filtered.columns))
+def build_table_dataframe(
+    filtered: pd.DataFrame,
+    admin_mode: bool,
+    *,
+    technical: bool = False,
+) -> pd.DataFrame:
+    cols = table_columns(
+        admin_mode,
+        set(filtered.columns),
+        technical=technical,
+    )
     if not cols:
         return pd.DataFrame()
     sort_col = "ranking_global" if "ranking_global" in filtered.columns else cols[0]
     table_df = filtered.sort_values(sort_col, na_position="last")[cols].copy()
+
+    if admin_mode:
+        integer_columns = {"ranking_global", "ranking_por_cultivo", "parcela_id"}
+        for column in integer_columns & set(table_df.columns):
+            table_df[column] = pd.to_numeric(
+                table_df[column],
+                errors="coerce",
+            ).astype("Int64")
+
+        decimals = 2 if technical else 1
+        numeric_columns = table_df.select_dtypes(include="number").columns
+        rounded = [column for column in numeric_columns if column not in integer_columns]
+        table_df[rounded] = table_df[rounded].round(decimals)
+
     return table_df.rename(columns=column_labels(cols))

@@ -1,5 +1,16 @@
 from __future__ import annotations
 
+ADMIN_OPERATIONAL_TABLE_COLUMNS = [
+    "ranking_global",
+    "parcela_id",
+    "cultivo",
+    "prioridad_visual",
+    "riesgo_actual",
+    "riesgo_operativo_5d",
+    "riesgo_operativo_10d",
+    "delta_operativo_10d",
+]
+
 ADMIN_TABLE_COLUMNS = [
     "ranking_global",
     "ranking_por_cultivo",
@@ -130,9 +141,17 @@ COLUMN_LABELS = {
 }
 
 
-def table_columns(admin_mode: bool, available_columns: list[str] | set[str]) -> list[str]:
+def table_columns(
+    admin_mode: bool,
+    available_columns: list[str] | set[str],
+    *,
+    technical: bool = True,
+) -> list[str]:
     available = set(available_columns)
-    source = ADMIN_TABLE_COLUMNS if admin_mode else CLIENT_TABLE_COLUMNS
+    if admin_mode:
+        source = ADMIN_TABLE_COLUMNS if technical else ADMIN_OPERATIONAL_TABLE_COLUMNS
+    else:
+        source = CLIENT_TABLE_COLUMNS
     return [col for col in source if col in available]
 
 
