@@ -263,7 +263,11 @@ en el histórico pudieron deberse a riego o lluvia entre imágenes.
 
 En el mapa productor, el slider temporal colorea de verde a rojo según la
 evolución operativa de cada parcela visible. La categoría de la animación usa
-umbrales absolutos por defecto, no posición relativa entre parcelas.
+umbrales absolutos por defecto, no posición relativa entre parcelas. El color
+se recalcula para cada día a partir del riesgo interpolado de esa parcela. Una
+parcela cambia de color cuando la proyección cruza un umbral de riesgo; si
+empeora sin cruzarlo, conserva su categoría aunque el valor mostrado sí
+aumente.
 
 La vista admin puede conservar columnas de predicción ML cruda en tablas
 técnicas:

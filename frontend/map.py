@@ -525,12 +525,12 @@ def risk_animation_frame(df: pd.DataFrame, relative_categories: bool = False) ->
         if relative_categories:
             frame = add_relative_risk_category(frame)
         else:
-            if "prioridad_visual" in frame.columns:
-                frame["riesgo_categoria"] = frame["prioridad_visual"]
-            elif "prioridad" in frame.columns:
-                frame["riesgo_categoria"] = frame["prioridad"]
-            else:
-                frame["riesgo_categoria"] = frame["riesgo_mapa"].apply(risk_category)
+            frame["riesgo_categoria"] = frame["riesgo_mapa"].apply(risk_category)
+            if "ranking_global" in frame.columns:
+                frame.loc[
+                    frame["ranking_global"].isna(),
+                    "riesgo_categoria",
+                ] = "sin ranking"
 
         # Restricción de simulación sin riego:
         # la categoría visual de una parcela puede mantenerse o empeorar,

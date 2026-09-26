@@ -68,6 +68,44 @@ class RiskAnimationFrameTest(unittest.TestCase):
         self.assertEqual(day_0.loc[1, "riesgo_categoria"], "baja")
         self.assertEqual(day_0.loc[2, "riesgo_categoria"], "critica")
 
+    def test_animation_recalculates_color_even_with_visual_priority(self):
+        df = pd.DataFrame(
+            [
+                {
+                    "parcela_id": 1,
+                    "ranking_global": 10,
+                    "prioridad_visual": "baja",
+                    "riesgo_actual": 34.0,
+                    "riesgo_5_dias": 38.0,
+                    "riesgo_10_dias": 40.0,
+                },
+            ]
+        )
+
+        result = risk_animation_frame(df)
+        parcel = result[result["parcela_id"] == 1].set_index("dia_proyeccion")
+
+        self.assertEqual(parcel.loc[0, "riesgo_categoria"], "baja")
+        self.assertEqual(parcel.loc[10, "riesgo_categoria"], "media")
+
+    def test_animation_keeps_unranked_parcels_without_category(self):
+        df = pd.DataFrame(
+            [
+                {
+                    "parcela_id": 1,
+                    "ranking_global": None,
+                    "prioridad_visual": "sin ranking",
+                    "riesgo_actual": 60.0,
+                    "riesgo_5_dias": 65.0,
+                    "riesgo_10_dias": 70.0,
+                },
+            ]
+        )
+
+        result = risk_animation_frame(df)
+
+        self.assertEqual(set(result["riesgo_categoria"]), {"sin ranking"})
+
 
 if __name__ == "__main__":
     unittest.main()
