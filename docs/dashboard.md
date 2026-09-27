@@ -231,14 +231,16 @@ predicciones crudas `riesgo_pred_*`.
   `Reiniciar`;
 - aviso superior con la fecha de `Ranking operativo usado`, para aclarar que la
   vista usa el último ranking con cobertura suficiente;
-- métricas separadas para `Ranking operativo` y `Lectura satelital`: la primera
-  es la fecha objetivo del ranking, la segunda es la imagen/observación efectiva
-  usada para calcular las parcelas;
-- mapa limitado a parcelas asociadas al productor como primera vista;
+- la sección `Mapa` usa una única fila compacta con parcelas evaluadas,
+  atención crítica/alta, señal promedio y última lectura;
+- el detalle completo de métricas, incluida la diferencia entre `Ranking
+  operativo` y `Lectura satelital`, queda en `Resumen`;
+- mapa limitado a parcelas asociadas al productor como primera vista y con
+  mayor proporción horizontal frente al panel de diagnóstico;
 - slider bajo el mapa para visualizar riesgo actual, proyección 5 días y
   proyección 10 días;
-- mensaje superior en lenguaje simple con cantidad de parcelas en atención y
-  evolución general esperada;
+- mensaje en `Resumen`, expresado en lenguaje simple, con cantidad de parcelas
+  en atención y evolución general esperada;
 - resumen operativo de sus parcelas;
 - métricas operativas con etiquetas no técnicas (`Atención crítica`,
   `Atención alta`, `Señal promedio`, `Señal más alta`);

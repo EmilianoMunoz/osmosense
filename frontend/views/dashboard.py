@@ -17,7 +17,7 @@ from frontend.map import bbox_center_zoom, render_map
 from frontend.components.branding import apply_brand_theme, render_fullscreen_loader
 from frontend.components.charts import render_distribution, render_prediction_panel
 from frontend.components.client_overview import render_client_field_overview, render_client_field_status
-from frontend.components.metrics import render_client_metrics
+from frontend.components.metrics import render_client_map_metrics, render_client_metrics
 from frontend.components.parcel_detail import render_client_parcel_dialog, render_parcel_dialog
 from frontend.components.tables import (
     build_table_dataframe,
@@ -223,7 +223,7 @@ def render_map_tab(
     selected_cliente_id: int | None,
     priority_mode: str = "",
 ) -> None:
-    left, right = st.columns([2.2, 1.0])
+    left, right = st.columns([2.45, 1.0])
 
     with left:
         if admin_mode:
@@ -520,8 +520,6 @@ def render_dashboard() -> None:
         return
 
     render_operational_ranking_notice(filtered)
-    render_client_metrics(filtered)
-    render_client_field_status(filtered)
     active_section = st.segmented_control(
         "Sección de productor",
         PRODUCER_SECTIONS,
@@ -533,6 +531,7 @@ def render_dashboard() -> None:
     active_section = active_section or "Mapa"
 
     if active_section == "Mapa":
+        render_client_map_metrics(filtered)
         render_map_tab(
             data=data,
             filtered=filtered,
@@ -545,6 +544,8 @@ def render_dashboard() -> None:
         return
 
     if active_section == "Resumen":
+        render_client_metrics(filtered)
+        render_client_field_status(filtered)
         render_client_field_overview(filtered)
         return
 

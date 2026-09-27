@@ -23,6 +23,19 @@ def apply_brand_theme() -> None:
     st.markdown(
         f"""
         <style>
+        div[data-testid="stMainBlockContainer"],
+        .block-container {{
+            padding-top: 2.25rem;
+            padding-bottom: 2rem;
+        }}
+
+        @media (max-width: 768px) {{
+            div[data-testid="stMainBlockContainer"],
+            .block-container {{
+                padding-top: 1.25rem;
+            }}
+        }}
+
         :root {{
             --primary-color: {BRAND_PRIMARY};
         }}

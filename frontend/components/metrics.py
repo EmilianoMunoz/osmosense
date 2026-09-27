@@ -56,6 +56,39 @@ def render_metrics(df: pd.DataFrame, admin_mode: bool = True) -> None:
         col12.metric("Conf. baja", baja_confianza)
 
 
+def render_client_map_metrics(df: pd.DataFrame) -> None:
+    priority_col = (
+        "prioridad_visual" if "prioridad_visual" in df.columns else "prioridad"
+    )
+    ranked = df[df["ranking_global"].notna()].copy()
+    latest_reading = (
+        _format_date(df["fecha_lectura"].dropna().max())
+        if "fecha_lectura" in df.columns and df["fecha_lectura"].notna().any()
+        else "-"
+    )
+    average_risk = (
+        float(ranked["riesgo_actual"].mean())
+        if not ranked.empty and "riesgo_actual" in ranked.columns
+        else 0.0
+    )
+
+    metrics = st.columns(5)
+    metrics[0].metric(
+        "Parcelas evaluadas",
+        f"{len(ranked):,}".replace(",", "."),
+    )
+    metrics[1].metric(
+        "Atención crítica",
+        int((df[priority_col] == "critica").sum()),
+    )
+    metrics[2].metric(
+        "Atención alta",
+        int((df[priority_col] == "alta").sum()),
+    )
+    metrics[3].metric("Señal promedio", f"{average_risk:.1f}")
+    metrics[4].metric("Última lectura", latest_reading)
+
+
 def render_client_metrics(df: pd.DataFrame) -> None:
     priority_col = "prioridad_visual" if "prioridad_visual" in df.columns else "prioridad"
     ranked = df[df["ranking_global"].notna()].copy()
