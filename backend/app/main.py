@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from backend.app.services.auth import authenticate_user, verify_access_token
 from backend.app.services.rankings import (
     admin_assign_cliente_parcela,
+    admin_assign_cliente_parcelas,
     admin_activar_parcela_disponible,
     admin_cliente_parcelas,
     admin_clientes,
@@ -15,6 +16,7 @@ from backend.app.services.rankings import (
     admin_create_parcela,
     admin_deactivate_parcela,
     admin_delete_cliente_parcela,
+    admin_delete_cliente_parcelas,
     admin_parcela,
     admin_parcelas,
     admin_parcelas_disponibles,
@@ -28,6 +30,8 @@ from backend.app.services.rankings import (
     regional_um_latest,
     regional_um_latest_geojson,
     regional_um_parcelas_latest_geojson,
+    ParcelAssignmentConflictError,
+    ParcelAssignmentValidationError,
 )
 from backend.app.services.pipeline_state import pipeline_state
 from backend.app.services.users import (
@@ -62,6 +66,20 @@ class ClienteParcelaAssign(BaseModel):
 
     parcela_id: int = Field(ge=1)
     etiqueta: str | None = None
+
+
+class ClienteParcelasAssign(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parcela_ids: list[int] = Field(min_length=1, max_length=5000)
+    cultivo_oficial: str = Field(pattern="^(vid|olivo)$")
+    etiqueta: str | None = Field(default=None, max_length=200)
+
+
+class ClienteParcelasDelete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parcela_ids: list[int] = Field(min_length=1, max_length=5000)
 
 
 class ParcelaCreate(BaseModel):
@@ -325,6 +343,10 @@ def post_admin_activar_parcela_disponible(
             cliente_id=payload.cliente_id,
             etiqueta=payload.etiqueta,
         )
+    except ParcelAssignmentConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ParcelAssignmentValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
@@ -532,6 +554,53 @@ def post_admin_cliente_parcela(
             payload.parcela_id,
             payload.etiqueta,
         )
+    except ParcelAssignmentConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ParcelAssignmentValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/admin/clientes/{cliente_id}/parcelas/lote", status_code=201)
+def post_admin_cliente_parcelas(
+    cliente_id: int,
+    payload: ClienteParcelasAssign,
+    _user: dict[str, Any] = Depends(require_roles("admin")),
+) -> dict:
+    try:
+        return admin_assign_cliente_parcelas(
+            cliente_id=cliente_id,
+            parcela_ids=payload.parcela_ids,
+            cultivo_oficial=payload.cultivo_oficial,
+            etiqueta=payload.etiqueta,
+        )
+    except ParcelAssignmentConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ParcelAssignmentValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/admin/clientes/{cliente_id}/parcelas/desasignar")
+def post_admin_delete_cliente_parcelas(
+    cliente_id: int,
+    payload: ClienteParcelasDelete,
+    _user: dict[str, Any] = Depends(require_roles("admin")),
+) -> dict:
+    try:
+        return admin_delete_cliente_parcelas(cliente_id, payload.parcela_ids)
+    except ParcelAssignmentValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:

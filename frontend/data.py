@@ -521,6 +521,35 @@ def assign_cliente_parcela(
     return response.json()
 
 
+def assign_cliente_parcelas(
+    cliente_id: int,
+    parcela_ids: list[int],
+    cultivo_oficial: str,
+    etiqueta: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "parcela_ids": sorted({int(value) for value in parcela_ids}),
+        "cultivo_oficial": cultivo_oficial,
+        "etiqueta": etiqueta,
+    }
+    response = requests.post(
+        f"{api_base_url()}/admin/clientes/{int(cliente_id)}/parcelas/lote",
+        json=payload,
+        headers=auth_headers(),
+        timeout=30,
+    )
+    response.raise_for_status()
+    fetch_admin_clientes_from_api.clear()
+    fetch_clientes_from_api.clear()
+    fetch_admin_parcelas_from_api.clear()
+    fetch_admin_parcelas_disponibles_from_api.clear()
+    fetch_geojson_from_api.clear()
+    fetch_cliente_geojson_from_api.clear()
+    fetch_me_geojson_from_api.clear()
+    fetch_me_parcelas_from_api.clear()
+    return response.json()
+
+
 def load_admin_cliente_parcelas(cliente_id: int) -> dict[str, Any]:
     try:
         response = requests.get(
@@ -539,6 +568,28 @@ def delete_cliente_parcela(cliente_id: int, parcela_id: int) -> dict[str, Any]:
         f"{api_base_url()}/admin/clientes/{int(cliente_id)}/parcelas/{int(parcela_id)}",
         headers=auth_headers(),
         timeout=10,
+    )
+    response.raise_for_status()
+    fetch_admin_clientes_from_api.clear()
+    fetch_clientes_from_api.clear()
+    fetch_admin_parcelas_from_api.clear()
+    fetch_geojson_from_api.clear()
+    fetch_cliente_geojson_from_api.clear()
+    fetch_me_geojson_from_api.clear()
+    fetch_me_parcelas_from_api.clear()
+    return response.json()
+
+
+def delete_cliente_parcelas(
+    cliente_id: int,
+    parcela_ids: list[int],
+) -> dict[str, Any]:
+    payload = {"parcela_ids": sorted({int(value) for value in parcela_ids})}
+    response = requests.post(
+        f"{api_base_url()}/admin/clientes/{int(cliente_id)}/parcelas/desasignar",
+        json=payload,
+        headers=auth_headers(),
+        timeout=30,
     )
     response.raise_for_status()
     fetch_admin_clientes_from_api.clear()

@@ -142,7 +142,9 @@ def cargar_parcelas_objetivo(path: str | Path | None = PARCELAS_GEOJSON) -> set[
 
     parcelas_path = Path(path)
     if not parcelas_path.exists():
-        return None
+        raise FileNotFoundError(
+            f"No existe el universo de parcelas objetivo: {parcelas_path}"
+        )
 
     import geopandas as gpd
 

@@ -562,7 +562,7 @@ CREATE TABLE IF NOT EXISTS cliente_parcela (
     PRIMARY KEY (cliente_id, parcela_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_cliente_parcela_parcela
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cliente_parcela_parcela
     ON cliente_parcela (parcela_id);
 ```
 
@@ -570,7 +570,7 @@ Decision metodologica:
 
 El sistema modela usuarios con rol y una relacion explicita entre productor y
 parcelas. Aunque el nombre tecnico conserve `cliente_id`, en producto se
-interpreta como cartera de parcelas del productor.
+interpreta como cartera de parcelas del productor. La restriccion unica por `parcela_id` evita que una misma parcela quede vinculada a dos productores.
 
 Por que no otra alternativa:
 

@@ -53,7 +53,7 @@ Define:
 | `ranking_hidrico_latest_geo` | Último ranking unido con geometría para mapa.             |
 | `clientes`                   | Perfil interno productor/cartera de parcelas. Conserva nombre legacy. |
 | `usuarios`                   | Login operativo y rol del usuario.                        |
-| `cliente_parcela`            | Relación interna productor-parcela. Conserva nombre legacy. |
+| `cliente_parcela`            | Relación interna productor-parcela. Una parcela admite un único productor. |
 | `zonas_um`                   | Geometría de unidades de manejo regionales.               |
 | `parcela_um`                 | Relación espacial parcela-UM.                             |
 | `ranking_um`                 | Ranking agregado regional por UM.                         |
@@ -81,6 +81,12 @@ parcelas activas.
 Si se agrega una parcela nueva en PostGIS y se activa como `vid` u `olivo`,
 puede entrar a la próxima extracción Sentinel cuando el pipeline se ejecuta con
 `--parcel-source postgis`.
+
+En ese modo, cada corrida exporta un snapshot GeoJSON del universo objetivo
+activo en PostGIS. El extractor Sentinel, el ranking, las auditorías y la
+zonificación UM consumen ese mismo snapshot. Así, una parcela reclasificada
+desde frutales, anuales o incultos no queda excluida por el GeoJSON histórico;
+comenzará a rankearse cuando disponga de una observación satelital válida.
 
 El extractor temporal ya soporta esa fuente con:
 

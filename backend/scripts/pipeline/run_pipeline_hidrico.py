@@ -13,6 +13,11 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from backend.app.services.parcel_targets import (
+    load_target_parcels_from_postgis,
+    require_database_url,
+    write_target_snapshot,
+)
 from backend.scripts.pipeline.generar_ranking_hidrico import generar_ranking
 
 
@@ -406,14 +411,49 @@ def promover_ranking_latest(
     state["ranking_latest_promoted"] = True
     log(f"Ranking latest promovido atómicamente: {target}", log_path)
 
-def ejecutar_ranking(args: argparse.Namespace, log_path: Path) -> dict:
+def preparar_universo_objetivo(args: argparse.Namespace, log_path: Path) -> Path:
+    if args.parcel_source != "postgis":
+        path = Path(args.parcelas)
+    else:
+        path = Path(args.extract_output_sample)
+        if not args.update_sentinel and not args.dry_run:
+            parcelas = load_target_parcels_from_postgis(
+                require_database_url(args.database_url)
+            )
+            write_target_snapshot(parcelas, path)
+            log(
+                "Snapshot de parcelas objetivo actualizado desde PostGIS: "
+                f"{path} ({len(parcelas)} parcelas)",
+                log_path,
+            )
+        elif args.dry_run and not path.exists():
+            path = Path(args.parcelas)
+            log(
+                "Dry-run: snapshot PostGIS ausente; se usa el GeoJSON local "
+                f"solo para validar el flujo: {path}",
+                log_path,
+            )
+
+    if not path.exists() and not args.dry_run:
+        raise FileNotFoundError(
+            f"No existe el snapshot de parcelas objetivo de la corrida: {path}"
+        )
+    log(f"Universo objetivo compartido por la corrida: {path}", log_path)
+    return path
+
+
+def ejecutar_ranking(
+    args: argparse.Namespace,
+    log_path: Path,
+    parcelas_path: str | Path,
+) -> dict:
     df_temporal = pd.read_csv(args.input)
     ranking = generar_ranking(
         df_temporal,
         Path(args.model_dir),
         args.fecha,
         args.ranking_config,
-        args.parcelas,
+        parcelas_path,
         args.max_reading_age_days,
     )
     validar_ranking_generado(ranking)
@@ -436,7 +476,8 @@ def ejecutar_ranking(args: argparse.Namespace, log_path: Path) -> dict:
         "input_temporal": args.input,
         "model_dir": args.model_dir,
         "ranking_config": args.ranking_config,
-        "parcelas_geojson": args.parcelas,
+        "parcelas_geojson": str(parcelas_path),
+        "parcel_source": args.parcel_source,
         "ranking_output": str(output_path),
         "ranking_latest": str(latest_path),
         "ranking_candidate": str(output_path),
@@ -458,6 +499,7 @@ def ejecutar_zonificacion_um(
     args: argparse.Namespace,
     state: dict,
     log_path: Path,
+    parcelas_path: str | Path,
 ) -> dict:
     command = [
         sys.executable,
@@ -465,7 +507,7 @@ def ejecutar_zonificacion_um(
         "--zonificacion",
         ZONIFICACION_GEOJSON,
         "--parcelas",
-        args.parcelas,
+        str(parcelas_path),
         "--ranking",
         ranking_candidato(state),
         "--out-dir",
@@ -581,6 +623,7 @@ def ejecutar_auditorias_calidad(
     args: argparse.Namespace,
     state: dict,
     log_path: Path,
+    parcelas_path: str | Path,
 ) -> dict:
     command_vecinos = [
         sys.executable,
@@ -588,7 +631,7 @@ def ejecutar_auditorias_calidad(
         "--ranking",
         ranking_candidato(state),
         "--parcelas",
-        args.parcelas,
+        str(parcelas_path),
         "--score-column",
         args.quality_score_column,
         "--output-detalle",
@@ -623,7 +666,7 @@ def ejecutar_auditorias_calidad(
         "--input",
         AUDIT_TEMPORAL_DETALLE,
         "--parcelas",
-        args.parcelas,
+        str(parcelas_path),
         "--output-detalle",
         AUDIT_RUIDO_DETALLE,
         "--output-resumen",
@@ -848,8 +891,9 @@ def ejecutar_pipeline(args: argparse.Namespace, log_path: Path) -> None:
         print(json.dumps(state, indent=2), flush=True)
         return
 
+    parcelas_path = preparar_universo_objetivo(args, log_path)
     log(f"Paso 2/{total_steps}: generar ranking", log_path)
-    state = ejecutar_ranking(args, log_path)
+    state = ejecutar_ranking(args, log_path, parcelas_path)
     state["fecha_dataset_antes"] = fecha_antes
     state["fecha_dataset_despues"] = fecha_despues
     state["log_path"] = str(log_path)
@@ -861,14 +905,14 @@ def ejecutar_pipeline(args: argparse.Namespace, log_path: Path) -> None:
     step = 3
     if args.update_zonificacion_um:
         log(f"Paso {step}/{total_steps}: regenerar ranking regional UM", log_path)
-        state = ejecutar_zonificacion_um(args, state, log_path)
+        state = ejecutar_zonificacion_um(args, state, log_path, parcelas_path)
         step += 1
     else:
         log("Zonificacion UM omitida", log_path)
 
     if quality_enabled:
         log(f"Paso {step}/{total_steps}: auditar calidad del ranking", log_path)
-        state = ejecutar_auditorias_calidad(args, state, log_path)
+        state = ejecutar_auditorias_calidad(args, state, log_path, parcelas_path)
         step += 1
     else:
         log("Auditorias de calidad omitidas", log_path)

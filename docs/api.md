@@ -561,11 +561,44 @@ Body:
 
 Si la relación ya existe, actualiza `etiqueta`.
 
+Para operaciones múltiples, el dashboard usa una única transacción:
+
+```http
+POST /admin/clientes/1/parcelas/lote
+```
+
+```json
+{
+  "parcela_ids": [38695, 38696, 38697],
+  "cultivo_oficial": "vid",
+  "etiqueta": "Lote norte"
+}
+```
+
+El backend bloquea las parcelas, valida que el destino sea un productor activo,
+reclasifica el cultivo cuando corresponde y crea todas las relaciones. Ante un
+conflicto o ID inválido se revierte el lote completo. Una parcela solo puede
+tener un productor.
+
 ### Quitar parcela de productor
 
 ```http
 DELETE /admin/clientes/1/parcelas/38695
 ```
+
+Para quitar varias relaciones de forma atómica:
+
+```http
+POST /admin/clientes/1/parcelas/desasignar
+```
+
+```json
+{
+  "parcela_ids": [38695, 38696]
+}
+```
+
+Si alguna relación no existe, no se elimina ninguna.
 
 ## Endpoints previstos para el mapa
 

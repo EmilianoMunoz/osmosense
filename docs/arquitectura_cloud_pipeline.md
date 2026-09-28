@@ -113,6 +113,12 @@ Endpoints FastAPI principales:
 
 ### Consistencia de publicación
 
+Cuando `--parcel-source postgis` está activo, PostGIS define el universo de
+parcelas de la corrida. Se guarda un snapshot GeoJSON por ejecución y esa misma
+ruta se entrega al ranking, la zonificación regional y las auditorías. La
+publicación falla explícitamente si el snapshot no existe, evitando mezclar el
+inventario actual de la base con el GeoJSON histórico.
+
 El ranking se genera primero como artefacto candidato fechado. Antes de usarlo se
 valida que no esté vacío, que tenga una única fecha válida, las columnas mínimas
 y un único registro por parcela. `ranking_hidrico_latest.csv` no se reemplaza

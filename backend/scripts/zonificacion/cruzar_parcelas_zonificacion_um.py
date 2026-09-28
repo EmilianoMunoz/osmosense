@@ -50,9 +50,11 @@ def read_inputs(
     zonas = zonas.reset_index(drop=True)
     zonas["um_id"] = zonas.index.astype(int)
 
-    if "fid" not in parcelas.columns:
-        raise ValueError("El GeoJSON de parcelas debe tener columna fid.")
-    parcelas = parcelas.rename(columns={"fid": "parcela_id"}).copy()
+    id_col = "parcela_id" if "parcela_id" in parcelas.columns else "fid"
+    if id_col not in parcelas.columns:
+        raise ValueError("El GeoJSON de parcelas debe tener columna fid o parcela_id.")
+    if id_col != "parcela_id":
+        parcelas = parcelas.rename(columns={id_col: "parcela_id"}).copy()
     parcelas["parcela_id"] = pd.to_numeric(parcelas["parcela_id"], errors="raise").astype(int)
 
     if "cultivo" in parcelas.columns:

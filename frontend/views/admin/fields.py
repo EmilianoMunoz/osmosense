@@ -4,17 +4,16 @@ import pandas as pd
 import streamlit as st
 
 from frontend.data import (
-    assign_cliente_parcela,
+    assign_cliente_parcelas,
     api_error_message,
     create_cliente,
-    delete_cliente_parcela,
+    delete_cliente_parcelas,
     features_to_frame,
     filtered_geojson,
     load_admin_cliente_parcelas,
     load_admin_parcelas,
     load_admin_usuarios,
     load_geojson,
-    update_parcela,
     update_usuario,
 )
 from frontend.map import bbox_center_zoom, feature_center, render_map, selected_parcela_id
@@ -279,8 +278,7 @@ def render_bulk_unassign_parcelas_dialog(
         ):
             try:
                 before_count = _productor_parcel_count(cliente_id)
-                for parcela_id in selected_ids:
-                    delete_cliente_parcela(cliente_id, int(parcela_id))
+                delete_cliente_parcelas(cliente_id, selected_ids)
                 after_count = _productor_parcel_count(cliente_id)
             except Exception as exc:
                 st.error(f"No se pudieron desasignar las parcelas: {api_error_message(exc)}")
@@ -334,13 +332,12 @@ def render_assignment_confirmation_dialog() -> None:
                 productor_series = pd.Series(productor)
                 cliente_id = _ensure_productor_assignment_profile(productor_series)
                 before_count = _productor_parcel_count(cliente_id)
-                for parcela_id in selected_ids:
-                    update_parcela(int(parcela_id), {"cultivo_oficial": cultivo_destino})
-                    assign_cliente_parcela(
-                        cliente_id=cliente_id,
-                        parcela_id=int(parcela_id),
-                        etiqueta=etiqueta,
-                    )
+                assign_cliente_parcelas(
+                    cliente_id=cliente_id,
+                    parcela_ids=selected_ids,
+                    cultivo_oficial=cultivo_destino,
+                    etiqueta=etiqueta,
+                )
                 after_count = _productor_parcel_count(cliente_id)
             except Exception as exc:
                 st.error(f"No se pudieron asignar las parcelas: {api_error_message(exc)}")

@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS cliente_parcela (
     PRIMARY KEY (cliente_id, parcela_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_cliente_parcela_parcela
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cliente_parcela_parcela
     ON cliente_parcela (parcela_id);
 
 CREATE INDEX IF NOT EXISTS idx_usuarios_cliente

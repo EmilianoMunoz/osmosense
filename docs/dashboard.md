@@ -135,6 +135,8 @@ DELETE /admin/usuarios/{usuario_id}
 GET /admin/clientes
 GET /admin/clientes/{cliente_id}/parcelas
 POST /admin/clientes/{cliente_id}/parcelas
+POST /admin/clientes/{cliente_id}/parcelas/lote
+POST /admin/clientes/{cliente_id}/parcelas/desasignar
 DELETE /admin/clientes/{cliente_id}/parcelas/{parcela_id}
 GET /admin/parcelas/disponibles
 POST /admin/parcelas/{parcela_id}/activar-disponible
@@ -201,6 +203,8 @@ viejas.
   el clic sobre una parcela agrega o quita su ID de la selección a desasignar;
 - confirmación en popup luego de asignar o desasignar, con productor,
   cantidad de parcelas, IDs afectados y conteo antes/después;
+- asignación, reclasificación y desasignación múltiple mediante una única
+  transacción backend; un error revierte el lote completo;
 - la sección `Incorporar al análisis` permite activar parcelas no vid/no olivo
   como `vid` u `olivo` y asignarlas opcionalmente a un productor;
 - `Calidad` resume cobertura, evaluadas, sin ranking y confianza alta mediante

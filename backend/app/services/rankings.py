@@ -25,6 +25,16 @@ ZONAS_UM_GEOJSON = "backend/data/zonificacion/um_con_cultivos.geojson"
 PARCELAS_UM_CSV = "backend/data/zonificacion/parcelas_um.csv"
 RANKING_UM_CSV = "backend/data/zonificacion/ranking_um_latest.csv"
 PARCELA_ID_COLUMN = "fid"
+MIN_ASSIGNABLE_AREA_M2 = 4000.0
+
+
+class ParcelAssignmentConflictError(ValueError):
+    pass
+
+
+class ParcelAssignmentValidationError(ValueError):
+    pass
+
 RANKING_REQUIRED_COLUMNS = {
     "fecha_actual",
     "parcela_id",
@@ -1532,11 +1542,40 @@ def admin_activar_parcela_disponible(
     cliente_id: int | None = None,
     etiqueta: str | None = None,
 ) -> dict[str, Any]:
+    if cliente_id is not None:
+        result = admin_assign_cliente_parcelas(
+            cliente_id=cliente_id,
+            parcela_ids=[parcela_id],
+            cultivo_oficial=cultivo_oficial,
+            etiqueta=etiqueta,
+        )
+        return {
+            "source": "postgis",
+            "item": result["parcelas"][0],
+            "cliente_parcela": result["items"][0],
+        }
+
     import psycopg
     from psycopg.rows import dict_row
 
     with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT parcela_id, area_m2
+                FROM parcelas
+                WHERE parcela_id = %s
+                FOR UPDATE
+                """,
+                [parcela_id],
+            )
+            current = cur.fetchone()
+            if current is None:
+                raise ValueError(f"Parcela inexistente: {parcela_id}")
+            if float(current.get("area_m2") or 0) < MIN_ASSIGNABLE_AREA_M2:
+                raise ParcelAssignmentValidationError(
+                    f"La parcela {parcela_id} tiene menos de 4000 m2."
+                )
             cur.execute(
                 """
                 UPDATE parcelas
@@ -1549,40 +1588,15 @@ def admin_activar_parcela_disponible(
                     updated_at = now()
                 WHERE parcela_id = %s
                 RETURNING
-                    parcela_id,
-                    cultivo_oficial,
-                    cultivo_original,
-                    area_m2,
-                    fuente,
-                    activo,
-                    updated_at
+                    parcela_id, cultivo_oficial, cultivo_original, area_m2,
+                    fuente, activo, updated_at
                 """,
                 [cultivo_oficial, parcela_id],
             )
-            row = cur.fetchone()
-            if row is None:
-                raise ValueError(f"Parcela inexistente: {parcela_id}")
-            item = _clean_postgis_row(dict(row))
-
-            assigned = None
-            if cliente_id is not None:
-                cur.execute("SELECT 1 FROM clientes WHERE cliente_id = %s", [cliente_id])
-                if cur.fetchone() is None:
-                    raise ValueError(f"Cliente inexistente: {cliente_id}")
-                cur.execute(
-                    """
-                    INSERT INTO cliente_parcela (cliente_id, parcela_id, etiqueta)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (cliente_id, parcela_id) DO UPDATE SET
-                        etiqueta = EXCLUDED.etiqueta
-                    RETURNING cliente_id, parcela_id, etiqueta, created_at
-                    """,
-                    [cliente_id, parcela_id, etiqueta],
-                )
-                assigned = _clean_postgis_row(dict(cur.fetchone()))
+            item = _clean_postgis_row(dict(cur.fetchone()))
         conn.commit()
 
-    return {"source": "postgis", "item": item, "cliente_parcela": assigned}
+    return {"source": "postgis", "item": item, "cliente_parcela": None}
 
 
 def admin_deactivate_parcela(parcela_id: int) -> dict[str, Any]:
@@ -1751,60 +1765,246 @@ def admin_update_cliente(cliente_id: int, payload: dict[str, Any]) -> dict[str, 
     return {"source": "postgis", "item": item}
 
 
-def admin_assign_cliente_parcela(
+def _normalizar_parcela_ids(parcela_ids: list[int]) -> list[int]:
+    ids = sorted({int(value) for value in parcela_ids})
+    if not ids or any(value < 1 for value in ids):
+        raise ParcelAssignmentValidationError("Debe indicar al menos una parcela valida.")
+    return ids
+
+
+def _validar_productor_activo(cur: Any, cliente_id: int) -> None:
+    cur.execute(
+        """
+        SELECT c.cliente_id
+        FROM clientes c
+        JOIN usuarios u
+          ON u.cliente_id = c.cliente_id
+        WHERE c.cliente_id = %s
+          AND c.activo = true
+          AND u.rol = 'productor'
+          AND u.activo = true
+        LIMIT 1
+        FOR UPDATE OF c
+        """,
+        [cliente_id],
+    )
+    if cur.fetchone() is None:
+        raise ParcelAssignmentValidationError(
+            f"El cliente {cliente_id} no corresponde a un productor activo."
+        )
+
+
+def admin_assign_cliente_parcelas(
     cliente_id: int,
-    parcela_id: int,
+    parcela_ids: list[int],
+    cultivo_oficial: str | None = None,
     etiqueta: str | None = None,
 ) -> dict[str, Any]:
     import psycopg
     from psycopg.rows import dict_row
 
+    ids = _normalizar_parcela_ids(parcela_ids)
+    if cultivo_oficial is not None and cultivo_oficial not in {"vid", "olivo"}:
+        raise ParcelAssignmentValidationError("El cultivo debe ser vid u olivo.")
+
     with psycopg.connect(_require_database_url(), row_factory=dict_row) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM clientes WHERE cliente_id = %s", [cliente_id])
-            if cur.fetchone() is None:
-                raise ValueError(f"Cliente inexistente: {cliente_id}")
+            _validar_productor_activo(cur, cliente_id)
+            cur.execute(
+                """
+                SELECT
+                    parcela_id, cultivo_oficial, cultivo_original, area_m2,
+                    fuente, activo, updated_at
+                FROM parcelas
+                WHERE parcela_id = ANY(%s)
+                ORDER BY parcela_id
+                FOR UPDATE
+                """,
+                [ids],
+            )
+            parcelas = [_clean_postgis_row(dict(row)) for row in cur.fetchall()]
+            found_ids = {int(row["parcela_id"]) for row in parcelas}
+            missing = sorted(set(ids) - found_ids)
+            if missing:
+                raise ValueError(
+                    "Parcelas inexistentes: " + ", ".join(map(str, missing))
+                )
 
-            cur.execute("SELECT 1 FROM parcelas WHERE parcela_id = %s", [parcela_id])
-            if cur.fetchone() is None:
-                raise ValueError(f"Parcela inexistente: {parcela_id}")
+            inactive = [int(row["parcela_id"]) for row in parcelas if not row["activo"]]
+            if inactive:
+                raise ParcelAssignmentValidationError(
+                    "Parcelas inactivas: " + ", ".join(map(str, inactive))
+                )
+
+            too_small = [
+                int(row["parcela_id"])
+                for row in parcelas
+                if float(row.get("area_m2") or 0) < MIN_ASSIGNABLE_AREA_M2
+            ]
+            if too_small:
+                raise ParcelAssignmentValidationError(
+                    "Parcelas por debajo de 4000 m2: "
+                    + ", ".join(map(str, too_small))
+                )
+
+            if cultivo_oficial is None:
+                invalid_crops = [
+                    int(row["parcela_id"])
+                    for row in parcelas
+                    if row.get("cultivo_oficial") not in {"vid", "olivo"}
+                ]
+                if invalid_crops:
+                    raise ParcelAssignmentValidationError(
+                        "Las parcelas requieren definir cultivo vid u olivo: "
+                        + ", ".join(map(str, invalid_crops))
+                    )
+
+            cur.execute(
+                """
+                SELECT parcela_id, cliente_id
+                FROM cliente_parcela
+                WHERE parcela_id = ANY(%s)
+                FOR UPDATE
+                """,
+                [ids],
+            )
+            owners = [dict(row) for row in cur.fetchall()]
+            conflicts = [
+                int(row["parcela_id"])
+                for row in owners
+                if int(row["cliente_id"]) != int(cliente_id)
+            ]
+            if conflicts:
+                raise ParcelAssignmentConflictError(
+                    "Parcelas ya asignadas a otro productor: "
+                    + ", ".join(map(str, sorted(conflicts)))
+                )
+
+            if cultivo_oficial is not None:
+                cur.execute(
+                    """
+                    UPDATE parcelas
+                    SET fuente = CASE
+                            WHEN cultivo_oficial NOT IN ('vid', 'olivo')
+                             AND fuente = 'idemendoza'
+                                THEN 'idemendoza_admin'
+                            ELSE fuente
+                        END,
+                        cultivo_oficial = %s,
+                        updated_at = now()
+                    WHERE parcela_id = ANY(%s)
+                    RETURNING
+                        parcela_id, cultivo_oficial, cultivo_original, area_m2,
+                        fuente, activo, updated_at
+                    """,
+                    [cultivo_oficial, ids],
+                )
+                parcelas = [
+                    _clean_postgis_row(dict(row)) for row in cur.fetchall()
+                ]
 
             cur.execute(
                 """
                 INSERT INTO cliente_parcela (cliente_id, parcela_id, etiqueta)
-                VALUES (%s, %s, %s)
+                SELECT %s, parcela_id, %s
+                FROM unnest(%s::bigint[]) AS parcela_id
                 ON CONFLICT (cliente_id, parcela_id) DO UPDATE SET
                     etiqueta = EXCLUDED.etiqueta
                 RETURNING cliente_id, parcela_id, etiqueta, created_at
                 """,
-                [cliente_id, parcela_id, etiqueta],
+                [cliente_id, etiqueta, ids],
             )
-            item = _clean_postgis_row(dict(cur.fetchone()))
+            assigned = [
+                _clean_postgis_row(dict(row)) for row in cur.fetchall()
+            ]
+            cur.execute(
+                "SELECT count(*)::integer AS total FROM cliente_parcela WHERE cliente_id = %s",
+                [cliente_id],
+            )
+            total = int(cur.fetchone()["total"])
         conn.commit()
 
-    return {"source": "postgis", "item": item}
+    return {
+        "source": "postgis",
+        "cliente_id": int(cliente_id),
+        "count": len(assigned),
+        "total_asignadas": total,
+        "items": assigned,
+        "parcelas": parcelas,
+    }
 
 
-def admin_delete_cliente_parcela(cliente_id: int, parcela_id: int) -> dict[str, Any]:
+def admin_assign_cliente_parcela(
+    cliente_id: int,
+    parcela_id: int,
+    etiqueta: str | None = None,
+) -> dict[str, Any]:
+    result = admin_assign_cliente_parcelas(
+        cliente_id,
+        [parcela_id],
+        etiqueta=etiqueta,
+    )
+    return {"source": "postgis", "item": result["items"][0]}
+
+
+def admin_delete_cliente_parcelas(
+    cliente_id: int,
+    parcela_ids: list[int],
+) -> dict[str, Any]:
     import psycopg
 
+    ids = _normalizar_parcela_ids(parcela_ids)
     with psycopg.connect(_require_database_url()) as conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM clientes WHERE cliente_id = %s", [cliente_id])
+            if cur.fetchone() is None:
+                raise ValueError(f"Cliente inexistente: {cliente_id}")
+            cur.execute(
+                """
+                SELECT parcela_id
+                FROM cliente_parcela
+                WHERE cliente_id = %s
+                  AND parcela_id = ANY(%s)
+                FOR UPDATE
+                """,
+                [cliente_id, ids],
+            )
+            existing = {int(row[0]) for row in cur.fetchall()}
+            missing = sorted(set(ids) - existing)
+            if missing:
+                raise ValueError(
+                    "Relaciones cliente-parcela inexistentes: "
+                    + ", ".join(map(str, missing))
+                )
             cur.execute(
                 """
                 DELETE FROM cliente_parcela
                 WHERE cliente_id = %s
-                  AND parcela_id = %s
+                  AND parcela_id = ANY(%s)
+                RETURNING parcela_id
                 """,
-                [cliente_id, parcela_id],
+                [cliente_id, ids],
             )
-            deleted = cur.rowcount
+            deleted_ids = sorted(int(row[0]) for row in cur.fetchall())
+            cur.execute(
+                "SELECT count(*) FROM cliente_parcela WHERE cliente_id = %s",
+                [cliente_id],
+            )
+            remaining = int(cur.fetchone()[0])
         conn.commit()
 
-    if deleted == 0:
-        raise ValueError(
-            f"No existe relación cliente-parcela: cliente_id={cliente_id}, parcela_id={parcela_id}"
-        )
+    return {
+        "source": "postgis",
+        "deleted": True,
+        "cliente_id": int(cliente_id),
+        "count": len(deleted_ids),
+        "remaining_count": remaining,
+        "parcela_ids": deleted_ids,
+    }
+
+
+def admin_delete_cliente_parcela(cliente_id: int, parcela_id: int) -> dict[str, Any]:
+    admin_delete_cliente_parcelas(cliente_id, [parcela_id])
     return {
         "source": "postgis",
         "deleted": True,

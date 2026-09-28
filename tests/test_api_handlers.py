@@ -215,6 +215,52 @@ class RankingsApiHandlersTest(unittest.TestCase):
         mocked.assert_called_once_with(1, 10, "Cuadro norte")
         self.assertEqual(result, expected)
 
+    def test_admin_assign_cliente_parcelas_handler_delegates_to_service(self):
+        payload = main.ClienteParcelasAssign(
+            parcela_ids=[10, 11],
+            cultivo_oficial="vid",
+            etiqueta="Finca norte",
+        )
+        expected = {"source": "postgis", "count": 2}
+        with patch.object(
+            main, "admin_assign_cliente_parcelas", return_value=expected
+        ) as mocked:
+            result = main.post_admin_cliente_parcelas(1, payload)
+
+        mocked.assert_called_once_with(
+            cliente_id=1,
+            parcela_ids=[10, 11],
+            cultivo_oficial="vid",
+            etiqueta="Finca norte",
+        )
+        self.assertEqual(result, expected)
+
+    def test_admin_unassign_cliente_parcelas_handler_delegates_to_service(self):
+        payload = main.ClienteParcelasDelete(parcela_ids=[10, 11])
+        expected = {"source": "postgis", "deleted": True, "count": 2}
+        with patch.object(
+            main, "admin_delete_cliente_parcelas", return_value=expected
+        ) as mocked:
+            result = main.post_admin_delete_cliente_parcelas(1, payload)
+
+        mocked.assert_called_once_with(1, [10, 11])
+        self.assertEqual(result, expected)
+
+    def test_admin_bulk_assignment_maps_owner_conflict_to_http_409(self):
+        payload = main.ClienteParcelasAssign(
+            parcela_ids=[10],
+            cultivo_oficial="olivo",
+        )
+        with patch.object(
+            main,
+            "admin_assign_cliente_parcelas",
+            side_effect=main.ParcelAssignmentConflictError("ocupada"),
+        ):
+            with self.assertRaises(main.HTTPException) as raised:
+                main.post_admin_cliente_parcelas(1, payload)
+
+        self.assertEqual(raised.exception.status_code, 409)
+
     def test_admin_delete_cliente_parcela_handler_delegates_to_service(self):
         expected = {"source": "postgis", "deleted": True, "cliente_id": 1, "parcela_id": 10}
         with patch.object(main, "admin_delete_cliente_parcela", return_value=expected) as mocked:

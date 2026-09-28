@@ -146,10 +146,56 @@ class PipelineResilienceTest(unittest.TestCase):
             self.assertTrue(state["ranking_latest_promoted"])
             self.assertFalse(any(root.glob("*.tmp")))
 
+    def test_postgis_target_snapshot_is_refreshed_without_sentinel_update(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            snapshot = root / "parcelas_objetivo.geojson"
+            args = Namespace(
+                parcel_source="postgis",
+                parcelas="parcelas_historicas.geojson",
+                extract_output_sample=str(snapshot),
+                update_sentinel=False,
+                dry_run=False,
+                database_url="postgresql://user:secret@db/estres",
+            )
+            target_rows = [1, 2]
+
+            def write_snapshot(_parcels, output):
+                Path(output).touch()
+
+            with (
+                patch.object(
+                    pipeline,
+                    "require_database_url",
+                    return_value=args.database_url,
+                ),
+                patch.object(
+                    pipeline,
+                    "load_target_parcels_from_postgis",
+                    return_value=target_rows,
+                ) as load,
+                patch.object(
+                    pipeline,
+                    "write_target_snapshot",
+                    side_effect=write_snapshot,
+                ) as write,
+            ):
+                result = pipeline.preparar_universo_objetivo(
+                    args, root / "pipeline.log"
+                )
+
+        self.assertEqual(result, snapshot)
+        load.assert_called_once_with(args.database_url)
+        write.assert_called_once_with(target_rows, snapshot)
+
     def test_postgis_publication_prepares_zoning_before_ranking(self):
         events = []
         args = Namespace(
             mode="cloud",
+            parcel_source="geojson",
+            parcelas="parcelas.geojson",
+            extract_output_sample="snapshot.geojson",
+            database_url=None,
             run_quality_audits=False,
             backfill_outlier_history=False,
             update_zonificacion_um=True,
@@ -164,7 +210,7 @@ class PipelineResilienceTest(unittest.TestCase):
             "ranking_latest": "latest.csv",
         }
 
-        def prepare_zoning(_args, current_state, _log_path):
+        def prepare_zoning(_args, current_state, _log_path, _parcelas_path):
             events.append("prepare_zoning")
             return current_state
 
