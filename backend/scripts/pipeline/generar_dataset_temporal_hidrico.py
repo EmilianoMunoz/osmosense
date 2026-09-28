@@ -1,4 +1,6 @@
 import argparse
+import os
+import shutil
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -339,6 +341,51 @@ def extraer_ventana(
     return resultados
 
 
+def append_observations_atomic(
+    frame: pd.DataFrame,
+    output_path: Path,
+    *,
+    preserve_existing: bool,
+) -> None:
+    if frame.empty:
+        return
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    frame_to_write = frame
+    if preserve_existing:
+        existing_columns = pd.read_csv(output_path, nrows=0).columns.tolist()
+        unexpected = sorted(set(frame.columns) - set(existing_columns))
+        if unexpected:
+            raise RuntimeError(
+                "La extracción produjo columnas nuevas incompatibles con el histórico: "
+                f"{unexpected}"
+            )
+        frame_to_write = frame.reindex(columns=existing_columns)
+
+    temporary = output_path.with_name(f".{output_path.name}.{os.getpid()}.tmp")
+    try:
+        if preserve_existing:
+            shutil.copyfile(output_path, temporary)
+            with temporary.open("rb+") as fh:
+                fh.seek(0, 2)
+                if fh.tell() > 0:
+                    fh.seek(-1, 2)
+                    if fh.read(1) != b"\n":
+                        fh.seek(0, 2)
+                        fh.write(b"\n")
+            frame_to_write.to_csv(
+                temporary,
+                mode="a",
+                header=False,
+                index=False,
+            )
+        else:
+            frame_to_write.to_csv(temporary, index=False)
+        temporary.replace(output_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def main() -> None:
     args = parse_args()
     inicializar_gee()
@@ -381,55 +428,55 @@ def main() -> None:
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    all_rows = []
-    fechas_extraidas = set()
+    fechas_extraidas: set[str] = set()
     max_fecha_extraida = None
+    existing_rows = 0
+    output_initialized = args.resume and output_path.exists()
 
     expanding_missing = (
         args.all_target_parcels
         and (args.missing_only_from_output or args.missing_date or args.target_ids_csv)
     )
 
-    if args.resume and output_path.exists():
-        df_existente = pd.read_csv(output_path)
-        if not df_existente.empty and "fecha" in df_existente.columns:
-            all_rows = df_existente.to_dict("records")
-            fechas_extraidas = set(df_existente["fecha"].astype(str).unique())
+    if output_initialized:
+        resume_metadata = pd.read_csv(output_path, usecols=["fecha"])
+        if not resume_metadata.empty:
+            existing_rows = len(resume_metadata)
+            fechas_extraidas = set(resume_metadata["fecha"].astype(str).unique())
             max_fecha_extraida = max(fechas_extraidas)
             print(
                 f"Reanudando desde {output_path}: "
-                f"{len(all_rows)} filas, {len(fechas_extraidas)} fechas ya extraidas"
+                f"{existing_rows} filas, {len(fechas_extraidas)} fechas ya extraidas"
             )
+        del resume_metadata
 
+    total_rows = existing_rows
     for fecha_inicio in fechas:
+        fecha_str = fecha_inicio.isoformat()
         if (
             args.resume_from_max_date
             and max_fecha_extraida is not None
-            and fecha_inicio.isoformat() <= max_fecha_extraida
+            and fecha_str <= max_fecha_extraida
         ):
-            print(f"{fecha_inicio.isoformat()}: anterior a max fecha, se omite", flush=True)
+            print(f"{fecha_str}: anterior a max fecha, se omite", flush=True)
             continue
 
-        if fecha_inicio.isoformat() in fechas_extraidas:
+        if fecha_str in fechas_extraidas:
             if expanding_missing:
                 print(
-                    f"{fecha_inicio.isoformat()}: ya extraida, "
-                    "se agregan parcelas faltantes",
+                    f"{fecha_str}: ya extraida, se agregan parcelas faltantes",
                     flush=True,
                 )
                 muestra_fecha = filtrar_observaciones_faltantes_por_fecha(
                     muestra,
                     output_path,
-                    fecha_inicio.isoformat(),
+                    fecha_str,
                 )
                 if muestra_fecha.empty:
-                    print(
-                        f"{fecha_inicio.isoformat()}: no hay parcelas faltantes",
-                        flush=True,
-                    )
+                    print(f"{fecha_str}: no hay parcelas faltantes", flush=True)
                     continue
             else:
-                print(f"{fecha_inicio.isoformat()}: ya extraida, se omite", flush=True)
+                print(f"{fecha_str}: ya extraida, se omite", flush=True)
                 continue
         else:
             muestra_fecha = muestra
@@ -441,24 +488,39 @@ def main() -> None:
             args.cloud_threshold,
             args.chunk_size,
         )
-        all_rows.extend(rows)
+        if not rows:
+            continue
 
-        if all_rows:
-            pd.DataFrame(all_rows).to_csv(output_path, index=False)
-            print(f"Parcial guardado: {output_path} ({len(all_rows)} filas)", flush=True)
+        new_observations = pd.DataFrame.from_records(rows)
+        del rows
+        new_observations = filtrar_observaciones_validas(
+            new_observations,
+            args.min_valid_pixels,
+        )
+        if new_observations.empty:
+            continue
 
-    df = pd.DataFrame(all_rows)
-    if df.empty:
+        append_observations_atomic(
+            new_observations,
+            output_path,
+            preserve_existing=output_initialized,
+        )
+        output_initialized = True
+        total_rows += len(new_observations)
+        fechas_extraidas.add(fecha_str)
+        print(f"Parcial guardado: {output_path} ({total_rows} filas)", flush=True)
+        del new_observations
+
+    if not output_initialized or not output_path.exists():
         raise RuntimeError("No se extrajeron observaciones temporales.")
 
-    df = filtrar_observaciones_validas(df, args.min_valid_pixels)
-    df.to_csv(output_path, index=False)
-
+    summary = pd.read_csv(output_path, usecols=["cultivo", "fecha"])
+    column_count = len(pd.read_csv(output_path, nrows=0).columns)
     print("\n=== Dataset temporal hidrico ===")
     print("Salida:", output_path)
-    print("Shape:", df.shape)
-    print("Distribucion:", df["cultivo"].value_counts().to_dict())
-    print("Rango fechas:", df["fecha"].min(), df["fecha"].max())
+    print("Shape:", (len(summary), column_count))
+    print("Distribucion:", summary["cultivo"].value_counts().to_dict())
+    print("Rango fechas:", summary["fecha"].min(), summary["fecha"].max())
 
 
 if __name__ == "__main__":

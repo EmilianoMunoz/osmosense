@@ -11,6 +11,7 @@ import pandas as pd
 
 import backend.app.services.rankings as rankings
 from backend.app.services.pipeline_state import _processing_health
+from backend.scripts.pipeline import generar_dataset_temporal_hidrico as extractor
 from backend.scripts.pipeline import run_pipeline_hidrico as pipeline
 from frontend.components import tables
 from frontend.data import ranking_items_to_feature_collection
@@ -53,6 +54,67 @@ class PipelineResilienceTest(unittest.TestCase):
         result = _processing_health(state, now=now)
 
         self.assertFalse(result["processing_stale"])
+
+    def test_incremental_observations_preserve_existing_rows_atomically(self):
+        existing = pd.DataFrame(
+            [
+                {
+                    "parcela_id": 1,
+                    "cultivo": "vid",
+                    "fecha": "2026-09-20",
+                    "ndvi_count": 4,
+                }
+            ]
+        )
+        new = pd.DataFrame(
+            [
+                {
+                    "parcela_id": 2,
+                    "cultivo": "olivo",
+                    "fecha": "2026-09-25",
+                    "ndvi_count": 5,
+                }
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "temporal.csv"
+            existing.to_csv(output, index=False)
+
+            extractor.append_observations_atomic(
+                new,
+                output,
+                preserve_existing=True,
+            )
+
+            result = pd.read_csv(output)
+            temporary_files = list(Path(tmpdir).glob(".*.tmp"))
+
+        self.assertEqual(result["parcela_id"].tolist(), [1, 2])
+        self.assertEqual(result["fecha"].tolist(), ["2026-09-20", "2026-09-25"])
+        self.assertEqual(temporary_files, [])
+
+    def test_incremental_observations_reject_schema_changes(self):
+        existing = pd.DataFrame(
+            [{"parcela_id": 1, "cultivo": "vid", "fecha": "2026-09-20"}]
+        )
+        incompatible = existing.assign(nueva_metrica=1)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "temporal.csv"
+            existing.to_csv(output, index=False)
+            before = output.read_text(encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "columnas nuevas"):
+                extractor.append_observations_atomic(
+                    incompatible,
+                    output,
+                    preserve_existing=True,
+                )
+
+            after = output.read_text(encoding="utf-8")
+
+        self.assertEqual(after, before)
 
     def test_review_table_supports_missing_noise_severity(self):
         frame = pd.DataFrame(
