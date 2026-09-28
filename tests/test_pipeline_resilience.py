@@ -2,12 +2,14 @@ import json
 import tempfile
 import unittest
 from argparse import Namespace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
 
 import backend.app.services.rankings as rankings
+from backend.app.services.pipeline_state import _processing_health
 from backend.scripts.pipeline import run_pipeline_hidrico as pipeline
 from frontend.components import tables
 from frontend.data import ranking_items_to_feature_collection
@@ -15,6 +17,42 @@ from frontend.views.dashboard import admin_requires_detailed_data
 
 
 class PipelineResilienceTest(unittest.TestCase):
+    def test_pipeline_lock_rejects_a_concurrent_run_and_releases_afterwards(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir)
+            with pipeline.pipeline_lock(state_dir, "run-1"):
+                with self.assertRaises(pipeline.PipelineAlreadyRunning) as raised:
+                    with pipeline.pipeline_lock(state_dir, "run-2"):
+                        self.fail("La segunda corrida no debía adquirir el lock")
+
+            with pipeline.pipeline_lock(state_dir, "run-3"):
+                pass
+
+        self.assertEqual(raised.exception.owner["run_id"], "run-1")
+
+    def test_processing_state_is_marked_stale_after_configured_window(self):
+        now = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
+        state = {
+            "status": "processing",
+            "started_at_utc": (now - timedelta(hours=7)).isoformat(),
+        }
+
+        result = _processing_health(state, now=now)
+
+        self.assertTrue(result["processing_stale"])
+        self.assertEqual(result["processing_elapsed_seconds"], 7 * 3600)
+
+    def test_recent_processing_state_is_not_marked_stale(self):
+        now = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
+        state = {
+            "status": "processing",
+            "started_at_utc": (now - timedelta(hours=2)).isoformat(),
+        }
+
+        result = _processing_health(state, now=now)
+
+        self.assertFalse(result["processing_stale"])
+
     def test_review_table_supports_missing_noise_severity(self):
         frame = pd.DataFrame(
             [

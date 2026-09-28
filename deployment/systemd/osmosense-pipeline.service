@@ -9,4 +9,6 @@ User=osmosense
 Group=osmosense
 WorkingDirectory=/opt/osmosense
 EnvironmentFile=/opt/osmosense/.env
+TimeoutStartSec=6h
+TimeoutStopSec=2min
 ExecStart=/opt/osmosense/venv/bin/python backend/scripts/pipeline/run_pipeline_hidrico.py --mode cloud --update-sentinel --update-recent-window --parcel-source postgis --skip-if-no-new-date --load-postgis

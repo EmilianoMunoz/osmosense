@@ -62,6 +62,7 @@ def _format_percent(value: object, decimals: int = 1) -> str:
 def _human_pipeline_reason(reason: object) -> str:
     reasons = {
         "sin_fecha_nueva": "Sin imagen Sentinel nueva",
+        "pipeline_ya_en_ejecucion": "Ya había una ejecución activa",
         "error": "Error de ejecución",
         None: "Sin observaciones",
         "": "Sin observaciones",
@@ -138,7 +139,7 @@ def render_pipeline_status() -> None:
     skipped = bool(state.get("skipped", False))
     failed = bool(state.get("failed", False))
     processing = state.get("status") == "processing"
-    processing_stale = processing and run_age_days is not None and run_age_days > 1
+    processing_stale = processing and bool(state.get("processing_stale", False))
     if processing_stale:
         status_label = "Ejecución interrumpida"
         status_message = (

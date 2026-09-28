@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 
 PIPELINE_STATE_PATH = Path("backend/data/state/pipeline_hidrico_state.json")
+DEFAULT_PROCESSING_STALE_HOURS = 6.0
 
 
 def _safe_read_json(path: Path) -> dict[str, Any]:
@@ -70,6 +71,44 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     return value
+
+
+def _processing_health(
+    state: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    if state.get("status") != "processing":
+        return state
+
+    value = state.get("started_at_utc") or state.get("last_run_utc")
+    if not value:
+        return state
+    try:
+        started = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return state
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    elapsed_seconds = max(0, int((current - started).total_seconds()))
+    try:
+        stale_hours = float(
+            os.getenv(
+                "PIPELINE_PROCESSING_STALE_HOURS",
+                str(DEFAULT_PROCESSING_STALE_HOURS),
+            )
+        )
+    except ValueError:
+        stale_hours = DEFAULT_PROCESSING_STALE_HOURS
+
+    enriched = dict(state)
+    enriched["processing_elapsed_seconds"] = elapsed_seconds
+    enriched["processing_stale"] = elapsed_seconds >= stale_hours * 3600
+    return enriched
 
 
 def _ranking_coverage_from_postgis() -> dict[str, Any]:
@@ -151,6 +190,7 @@ def pipeline_state() -> dict[str, Any]:
             "ranking_coverage": _ranking_coverage_from_postgis(),
         }
 
+    state = _processing_health(state)
     ranking_latest = state.get("ranking_latest")
     if not ranking_latest and not state.get("skipped"):
         ranking_latest = "backend/data/rankings/ranking_hidrico_latest.csv"

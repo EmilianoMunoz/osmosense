@@ -1,11 +1,14 @@
 import argparse
+import fcntl
 import json
 import os
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterator, TextIO
 
 import pandas as pd
 
@@ -41,6 +44,58 @@ AUDIT_RUIDO_RESUMEN = "backend/data/auditoria_ruido_puntual_resumen.csv"
 AUDIT_RUIDO_GEOJSON = "backend/data/auditoria_ruido_puntual_detalle.geojson"
 ZONIFICACION_GEOJSON = "backend/data/zonificacion/regional_dgi_san_rafael.geojson"
 ZONIFICACION_OUT_DIR = "backend/data/zonificacion"
+PIPELINE_LOCK_FILENAME = "pipeline_hidrico.lock"
+
+
+class PipelineAlreadyRunning(RuntimeError):
+    def __init__(self, owner: dict[str, object] | None = None) -> None:
+        self.owner = owner or {}
+        super().__init__("Ya existe una ejecución activa del pipeline hídrico.")
+
+
+def _read_lock_owner(handle: TextIO) -> dict[str, object]:
+    handle.seek(0)
+    try:
+        value = json.loads(handle.read() or "{}")
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+@contextmanager
+def pipeline_lock(state_dir: Path, run_id: str) -> Iterator[Path]:
+    """Evita corridas concurrentes en la misma VM y libera al terminar el proceso."""
+    state_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = state_dir / PIPELINE_LOCK_FILENAME
+    handle = lock_path.open("a+", encoding="utf-8")
+    acquired = False
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise PipelineAlreadyRunning(_read_lock_owner(handle)) from exc
+
+        acquired = True
+        handle.seek(0)
+        handle.truncate()
+        json.dump(
+            {
+                "run_id": run_id,
+                "pid": os.getpid(),
+                "acquired_at_utc": utc_now(),
+            },
+            handle,
+        )
+        handle.flush()
+        os.fsync(handle.fileno())
+        yield lock_path
+    finally:
+        if acquired:
+            handle.seek(0)
+            handle.truncate()
+            handle.flush()
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 def parse_args() -> argparse.Namespace:
@@ -832,9 +887,14 @@ def cargar_zonificacion_postgis(args: argparse.Namespace, state: dict, log_path:
 def ejecutar_pipeline(args: argparse.Namespace, log_path: Path) -> None:
     log(f"Inicio pipeline hidrico mode={args.mode}", log_path)
     log(f"Dry run: {args.dry_run}", log_path)
+    run_id = log_path.stem.removeprefix("pipeline_hidrico_")
+    started_at_utc = utc_now()
     running_state = {
+        "run_id": run_id,
+        "pid": os.getpid(),
         "mode": args.mode,
-        "last_run_utc": utc_now(),
+        "last_run_utc": started_at_utc,
+        "started_at_utc": started_at_utc,
         "status": "processing",
         "skipped": False,
         "input_temporal": args.input,
@@ -871,8 +931,11 @@ def ejecutar_pipeline(args: argparse.Namespace, log_path: Path) -> None:
         and fecha_despues == fecha_antes
     ):
         state = {
+            "run_id": run_id,
+            "pid": os.getpid(),
             "mode": args.mode,
             "last_run_utc": utc_now(),
+            "started_at_utc": started_at_utc,
             "input_temporal": args.input,
             "fecha_dataset": fecha_despues,
             "fecha_dataset_antes": fecha_antes,
@@ -894,6 +957,9 @@ def ejecutar_pipeline(args: argparse.Namespace, log_path: Path) -> None:
     parcelas_path = preparar_universo_objetivo(args, log_path)
     log(f"Paso 2/{total_steps}: generar ranking", log_path)
     state = ejecutar_ranking(args, log_path, parcelas_path)
+    state["run_id"] = run_id
+    state["pid"] = os.getpid()
+    state["started_at_utc"] = started_at_utc
     state["fecha_dataset_antes"] = fecha_antes
     state["fecha_dataset_despues"] = fecha_despues
     state["log_path"] = str(log_path)
@@ -940,13 +1006,39 @@ def ejecutar_pipeline(args: argparse.Namespace, log_path: Path) -> None:
 
 def main() -> None:
     args = parse_args()
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     log_path = Path(args.logs_dir) / f"pipeline_hidrico_{run_id}.log"
 
     try:
-        ejecutar_pipeline(args, log_path)
+        with pipeline_lock(Path(args.state_dir), run_id):
+            ejecutar_pipeline(args, log_path)
+    except PipelineAlreadyRunning as exc:
+        owner = exc.owner
+        owner_run = owner.get("run_id", "desconocida")
+        owner_pid = owner.get("pid", "desconocido")
+        log(
+            "Pipeline omitido: ya existe una ejecución activa "
+            f"run_id={owner_run} pid={owner_pid}",
+            log_path,
+        )
+        print(
+            json.dumps(
+                {
+                    "status": "skipped",
+                    "skipped": True,
+                    "reason": "pipeline_ya_en_ejecucion",
+                    "active_run_id": owner.get("run_id"),
+                    "active_pid": owner.get("pid"),
+                },
+                indent=2,
+            ),
+            flush=True,
+        )
+        return
     except Exception as exc:
         state = {
+            "run_id": run_id,
+            "pid": os.getpid(),
             "mode": args.mode,
             "last_run_utc": utc_now(),
             "input_temporal": args.input,
