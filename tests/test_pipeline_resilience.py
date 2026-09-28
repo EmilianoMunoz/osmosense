@@ -1,10 +1,11 @@
 import json
+import subprocess
 import tempfile
 import unittest
 from argparse import Namespace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
@@ -103,6 +104,52 @@ class PipelineResilienceTest(unittest.TestCase):
         self.assertIsNone(props["severidad_ruido"])
         self.assertIn("accion_recomendada", props)
         self.assertFalse(props["outlier_espacial"])
+
+    def test_gee_command_retries_and_then_succeeds(self):
+        failed = subprocess.CompletedProcess(["python"], 1, "", "temporary")
+        succeeded = subprocess.CompletedProcess(["python"], 0, "ok", "")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "pipeline.log"
+            with (
+                patch.object(
+                    pipeline.subprocess,
+                    "run",
+                    side_effect=[failed, succeeded],
+                ) as run,
+                patch.object(pipeline.time, "sleep") as sleep,
+            ):
+                pipeline.run_command(
+                    ["python", "gee_step.py"],
+                    log_path,
+                    False,
+                    retries=2,
+                    retry_delay_seconds=3,
+                )
+
+            log_text = log_path.read_text(encoding="utf-8")
+
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(3)
+        self.assertIn("reintento 1/2", log_text)
+
+    def test_gee_operation_uses_exponential_backoff(self):
+        operation = Mock(
+            side_effect=[RuntimeError("temporary"), RuntimeError("temporary"), 4]
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(pipeline.time, "sleep") as sleep:
+                result = pipeline.run_gee_operation(
+                    operation,
+                    Path(tmpdir) / "pipeline.log",
+                    "Consulta GEE",
+                    retries=2,
+                    retry_delay_seconds=5,
+                )
+
+        self.assertEqual(result, 4)
+        self.assertEqual(operation.call_count, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10])
 
     def test_pipeline_log_redacts_database_password(self):
         command = [

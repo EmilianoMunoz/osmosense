@@ -5,10 +5,11 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterator, TextIO
+from typing import Callable, Iterator, TextIO, TypeVar
 
 import pandas as pd
 
@@ -45,6 +46,7 @@ AUDIT_RUIDO_GEOJSON = "backend/data/auditoria_ruido_puntual_detalle.geojson"
 ZONIFICACION_GEOJSON = "backend/data/zonificacion/regional_dgi_san_rafael.geojson"
 ZONIFICACION_OUT_DIR = "backend/data/zonificacion"
 PIPELINE_LOCK_FILENAME = "pipeline_hidrico.lock"
+T = TypeVar("T")
 
 
 class PipelineAlreadyRunning(RuntimeError):
@@ -214,6 +216,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Si se actualiza Sentinel/GEE y la ultima fecha no cambia, omite el ranking.",
     )
+    parser.add_argument(
+        "--gee-retries",
+        type=int,
+        default=2,
+        help="Reintentos adicionales para operaciones transitorias de Earth Engine.",
+    )
+    parser.add_argument(
+        "--gee-retry-delay-seconds",
+        type=float,
+        default=20.0,
+        help="Espera base entre reintentos GEE; aumenta exponencialmente.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -244,23 +258,70 @@ def command_for_log(command: list[str]) -> str:
     return " ".join(safe_command)
 
 
-def run_command(command: list[str], log_path: Path, dry_run: bool) -> None:
-    log("CMD " + command_for_log(command), log_path)
+def _retry_delay(base_seconds: float, attempt: int) -> float:
+    return max(0.0, base_seconds) * (2 ** max(0, attempt - 1))
+
+
+def run_command(
+    command: list[str],
+    log_path: Path,
+    dry_run: bool,
+    *,
+    retries: int = 0,
+    retry_delay_seconds: float = 20.0,
+) -> None:
+    safe_command = command_for_log(command)
+    log("CMD " + safe_command, log_path)
     if dry_run:
         return
 
-    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
-    if result.stdout:
-        for line in result.stdout.rstrip().splitlines():
-            log("OUT " + line, log_path)
-    if result.stderr:
-        for line in result.stderr.rstrip().splitlines():
-            log("ERR " + line, log_path)
-    if result.returncode != 0:
+    attempts = max(0, retries) + 1
+    for attempt in range(1, attempts + 1):
+        result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
+        if result.stdout:
+            for line in result.stdout.rstrip().splitlines():
+                log("OUT " + line, log_path)
+        if result.stderr:
+            for line in result.stderr.rstrip().splitlines():
+                log("ERR " + line, log_path)
+        if result.returncode == 0:
+            return
+        if attempt < attempts:
+            delay = _retry_delay(retry_delay_seconds, attempt)
+            log(
+                "Comando GEE falló; "
+                f"reintento {attempt}/{attempts - 1} en {delay:g}s",
+                log_path,
+            )
+            time.sleep(delay)
+            continue
         raise RuntimeError(
-            f"Comando fallo con exit code {result.returncode}: "
-            f"{command_for_log(command)}"
+            f"Comando fallo con exit code {result.returncode}: {safe_command}"
         )
+
+
+def run_gee_operation(
+    operation: Callable[[], T],
+    log_path: Path,
+    description: str,
+    *,
+    retries: int,
+    retry_delay_seconds: float,
+) -> T:
+    attempts = max(0, retries) + 1
+    for attempt in range(1, attempts + 1):
+        try:
+            return operation()
+        except Exception as exc:
+            if attempt >= attempts:
+                raise
+            delay = _retry_delay(retry_delay_seconds, attempt)
+            log(
+                f"{description} falló con {type(exc).__name__}; "
+                f"reintento {attempt}/{attempts - 1} en {delay:g}s",
+                log_path,
+            )
+            time.sleep(delay)
 
 
 def recent_window_bounds(
@@ -279,7 +340,13 @@ def resolver_latest_valid_date(args: argparse.Namespace, log_path: Path) -> str:
     from backend.app.core.region import region_san_rafael_ee
     from backend.app.services.images import obtener_imagenes_sentinel
 
-    inicializar_gee()
+    run_gee_operation(
+        inicializar_gee,
+        log_path,
+        "Inicialización de Earth Engine",
+        retries=args.gee_retries,
+        retry_delay_seconds=args.gee_retry_delay_seconds,
+    )
     region = region_san_rafael_ee()
     end = date.fromisoformat(args.extract_end_date or datetime.now().date().isoformat())
 
@@ -292,7 +359,15 @@ def resolver_latest_valid_date(args: argparse.Namespace, log_path: Path) -> str:
             candidate_end.isoformat(),
             umbral_nubosidad=args.extract_cloud_threshold,
         )
-        image_count = int(coleccion.size().getInfo())
+        image_count = int(
+            run_gee_operation(
+                lambda: coleccion.size().getInfo(),
+                log_path,
+                "Consulta de disponibilidad Sentinel",
+                retries=args.gee_retries,
+                retry_delay_seconds=args.gee_retry_delay_seconds,
+            )
+        )
         log(
             "Latest Sentinel candidato: "
             f"{candidate_start.isoformat()} -> {candidate_end.isoformat()} "
@@ -371,7 +446,13 @@ def actualizar_sentinel(args: argparse.Namespace, log_path: Path) -> None:
         f"resolve_latest_valid={args.resolve_latest_valid_date}",
         log_path,
     )
-    run_command(command, log_path, args.dry_run)
+    run_command(
+        command,
+        log_path,
+        args.dry_run,
+        retries=args.gee_retries,
+        retry_delay_seconds=args.gee_retry_delay_seconds,
+    )
 
 
 def ultima_fecha_dataset(path: str | Path) -> str | None:
@@ -839,7 +920,13 @@ def ejecutar_backfill_outlier_history(
     ]
     if args.parcel_source == "postgis" and args.database_url:
         command.extend(["--database-url", args.database_url])
-    run_command(command, log_path, args.dry_run)
+    run_command(
+        command,
+        log_path,
+        args.dry_run,
+        retries=args.gee_retries,
+        retry_delay_seconds=args.gee_retry_delay_seconds,
+    )
 
 
 def cargar_ranking_postgis(args: argparse.Namespace, state: dict, log_path: Path) -> None:
