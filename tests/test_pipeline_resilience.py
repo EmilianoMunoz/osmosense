@@ -10,6 +10,9 @@ from unittest.mock import Mock, patch
 import pandas as pd
 
 import backend.app.services.rankings as rankings
+from backend.scripts.maintenance.record_pipeline_service_result import (
+    record_service_result,
+)
 from backend.app.services.pipeline_state import _processing_health
 from backend.scripts.pipeline import generar_dataset_temporal_hidrico as extractor
 from backend.scripts.pipeline import run_pipeline_hidrico as pipeline
@@ -19,6 +22,50 @@ from frontend.views.dashboard import admin_requires_detailed_data
 
 
 class PipelineResilienceTest(unittest.TestCase):
+    def test_systemd_failure_replaces_stale_processing_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "pipeline_hidrico_state.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "run_id": "run-1",
+                        "status": "processing",
+                        "started_at_utc": "2026-10-25T03:30:00+00:00",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            changed = record_service_result(
+                {
+                    "SERVICE_RESULT": "signal",
+                    "EXIT_CODE": "killed",
+                    "EXIT_STATUS": "9",
+                },
+                state_path,
+            )
+            result = json.loads(state_path.read_text(encoding="utf-8"))
+
+        self.assertTrue(changed)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["reason"], "service_terminated")
+        self.assertEqual(result["service_exit_status"], "9")
+
+    def test_systemd_success_does_not_replace_pipeline_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "pipeline_hidrico_state.json"
+            original = {"run_id": "run-1", "status": "success"}
+            state_path.write_text(json.dumps(original), encoding="utf-8")
+
+            changed = record_service_result(
+                {"SERVICE_RESULT": "success"},
+                state_path,
+            )
+            result = json.loads(state_path.read_text(encoding="utf-8"))
+
+        self.assertFalse(changed)
+        self.assertEqual(result, original)
+
     def test_pipeline_lock_rejects_a_concurrent_run_and_releases_afterwards(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_dir = Path(tmpdir)

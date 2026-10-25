@@ -63,6 +63,7 @@ def _human_pipeline_reason(reason: object) -> str:
     reasons = {
         "sin_fecha_nueva": "Sin imagen Sentinel nueva",
         "pipeline_ya_en_ejecucion": "Ya había una ejecución activa",
+        "service_terminated": "Servicio terminado externamente",
         "error": "Error de ejecución",
         None: "Sin observaciones",
         "": "Sin observaciones",

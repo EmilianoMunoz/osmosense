@@ -11,7 +11,11 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.scripts.pipeline.generar_targets_hidricos_regresion import preparar_observaciones
+from backend.scripts.pipeline.generar_targets_hidricos_regresion import (
+    BASE_FEATURES,
+    HYDRIC_FEATURES,
+    agregar_features_temporales,
+)
 
 
 INPUT_TEMPORAL = "backend/data/dataset_temporal_hidrico.csv"
@@ -205,6 +209,99 @@ def seleccionar_fecha(
     return latest, fecha_objetivo.strftime("%Y-%m-%d")
 
 
+def preparar_observaciones_latest(
+    df: pd.DataFrame,
+    fecha: str | None,
+    max_reading_age_days: int,
+) -> tuple[pd.DataFrame, str]:
+    """Calcula las mismas variables temporales solo para las filas a predecir."""
+    df = df[df["cultivo"].isin(TARGET_CROPS)].copy()
+    df["fecha"] = pd.to_datetime(df["fecha"])
+
+    grouped_date = df.groupby(["cultivo", "fecha"], sort=False)
+    df["riesgo_hidrico"] = 100 * (
+        0.35 * (1.0 - grouped_date["ndmi_mean"].rank(pct=True, method="average"))
+        + 0.30 * grouped_date["msi_mean"].rank(pct=True, method="average")
+        + 0.15 * (1.0 - grouped_date["ndwi_mean"].rank(pct=True, method="average"))
+        + 0.10 * (1.0 - grouped_date["nbr_mean"].rank(pct=True, method="average"))
+        + 0.10 * (1.0 - grouped_date["ndvi_mean"].rank(pct=True, method="average"))
+    ).clip(0, 100)
+
+    df = df.sort_values(["parcela_id", "fecha"]).copy()
+    latest, fecha_usada = seleccionar_fecha(df, fecha, max_reading_age_days)
+    latest = agregar_features_temporales(latest)
+    latest_indices = latest.index
+    grouped_parcel = df.groupby("parcela_id", sort=False)
+
+    derived: dict[str, pd.Series] = {}
+    history_columns = [
+        column
+        for column in BASE_FEATURES + ["riesgo_hidrico"]
+        if column in df.columns
+    ]
+    for column in history_columns:
+        current = latest[column]
+        lag1 = grouped_parcel[column].shift(1).loc[latest_indices]
+        lag2 = grouped_parcel[column].shift(2).loc[latest_indices]
+        lag3 = grouped_parcel[column].shift(3).loc[latest_indices]
+        derived[f"{column}_lag1"] = lag1
+        derived[f"{column}_lag2"] = lag2
+        derived[f"{column}_lag3"] = lag3
+        derived[f"{column}_delta_5d"] = current - lag1
+        derived[f"{column}_delta_10d"] = current - lag2
+        derived[f"{column}_delta_15d"] = current - lag3
+
+        rolling = grouped_parcel[column].rolling(3, min_periods=1)
+        derived[f"{column}_rolling3_mean"] = (
+            rolling.mean().reset_index(level=0, drop=True).loc[latest_indices]
+        )
+        derived[f"{column}_rolling3_std"] = (
+            rolling.std().reset_index(level=0, drop=True).loc[latest_indices]
+        )
+
+        expanding_mean = (
+            grouped_parcel[column]
+            .expanding(min_periods=2)
+            .mean()
+            .reset_index(level=0, drop=True)
+        )
+        expanding_std = (
+            grouped_parcel[column]
+            .expanding(min_periods=3)
+            .std()
+            .reset_index(level=0, drop=True)
+        )
+        history_mean = (
+            expanding_mean.groupby(df["parcela_id"]).shift(1).loc[latest_indices]
+        )
+        history_std = (
+            expanding_std.groupby(df["parcela_id"]).shift(1).loc[latest_indices]
+        )
+        derived[f"{column}_hist_mean_prev"] = history_mean
+        derived[f"{column}_hist_std_prev"] = history_std
+        derived[f"{column}_anomalia_parcela"] = (
+            (current - history_mean) / (history_std.abs() + 1e-6)
+        )
+
+    relative_columns = [
+        column
+        for column in HYDRIC_FEATURES + ["riesgo_hidrico"]
+        if column in df.columns
+    ]
+    grouped_date = df.groupby(["cultivo", "fecha"], sort=False)
+    for column in relative_columns:
+        grouped = grouped_date[column]
+        median = grouped.transform("median").loc[latest_indices]
+        q75 = grouped.transform(lambda values: values.quantile(0.75)).loc[latest_indices]
+        q25 = grouped.transform(lambda values: values.quantile(0.25)).loc[latest_indices]
+        derived[f"{column}_rel_fecha"] = (
+            (latest[column] - median) / ((q75 - q25).abs() + 1e-6)
+        )
+
+    latest = pd.concat([latest, pd.DataFrame(derived, index=latest.index)], axis=1)
+    return latest, fecha_usada
+
+
 def predecir_horizonte(latest: pd.DataFrame, model_dir: Path, horizon: int) -> pd.Series:
     pred = pd.Series(index=latest.index, dtype=float)
 
@@ -307,8 +404,11 @@ def generar_ranking(
 ) -> pd.DataFrame:
     config = cargar_config(ranking_config)
     df_temporal = filtrar_parcelas_objetivo(df_temporal, parcelas_path)
-    df = preparar_observaciones(df_temporal)
-    latest, fecha_usada = seleccionar_fecha(df, fecha, max_reading_age_days)
+    latest, fecha_usada = preparar_observaciones_latest(
+        df_temporal,
+        fecha,
+        max_reading_age_days,
+    )
 
     ranking = latest[
         [
